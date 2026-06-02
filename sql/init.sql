@@ -1,0 +1,9 @@
+CREATE TABLE IF NOT EXISTS template (
+    alias VARCHAR(255) PRIMARY KEY,
+    text VARCHAR(255)
+);
+
+CREATE TABLE IF NOT EXISTS filepath (
+    alias VARCHAR(255) PRIMARY KEY,
+    path VARCHAR(255)
+);

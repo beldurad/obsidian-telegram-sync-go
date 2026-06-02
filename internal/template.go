@@ -1,6 +1,9 @@
 package app
 
-import "strings"
+import (
+	"context"
+	"strings"
+)
 
 // Template represents text pattern which applies to [Note]'s text
 type Template struct {
@@ -19,5 +22,5 @@ func (t *Template) Validate() bool {
 }
 
 type TemplateService interface {
-	Save(*Template) error
+	Save(context.Context, *Template) error
 }
