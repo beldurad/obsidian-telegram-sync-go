@@ -42,13 +42,36 @@ type user struct {
 type TelegramClient struct {
 	baseURL      string
 	lastUpdateID int
+	messages     chan<- app.UserMessage
+	responses    <-chan app.BotResponse
 }
 
-func NewTelegramClient(token string) *TelegramClient {
+func NewTelegramClient(token string, messages chan<- app.UserMessage, responses <-chan app.BotResponse) *TelegramClient {
 	return &TelegramClient{
 		baseURL:      fmt.Sprintf("%s/bot%s", baseURL, token),
 		lastUpdateID: -1,
+		messages:     messages,
+		responses:    responses,
 	}
+}
+
+func (c *TelegramClient) StartUpdateReader() {
+	for {
+		messages, err := c.GetUpdates()
+		if err != nil {
+			continue
+		}
+		for _, m := range messages {
+			c.messages <- m
+		}
+	}
+}
+
+func (c *TelegramClient) StartResponseWriter() {
+	for r := range c.responses {
+		c.SendBotResponse(r)
+	}
+
 }
 
 func (c *TelegramClient) GetUpdates() ([]app.UserMessage, error) {
