@@ -7,3 +7,8 @@ CREATE TABLE IF NOT EXISTS filepath (
     alias VARCHAR(255) PRIMARY KEY,
     path VARCHAR(255)
 );
+
+CREATE TABLE IF NOT EXISTS user_state (
+    username VARCHAR(255) PRIMARY KEY,
+    state INT
+)
