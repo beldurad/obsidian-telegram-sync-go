@@ -23,6 +23,18 @@ type Bot struct {
 	responses chan BotResponse
 }
 
+func NewBot(messages <-chan UserMessage) *Bot {
+	return &Bot{
+		messages:  messages,
+		handlers:  make([]MessageHandler, 0),
+		responses: make(chan BotResponse),
+	}
+}
+
+func (b *Bot) RegiserHandler(h MessageHandler) {
+	b.handlers = append(b.handlers, h)
+}
+
 func (b *Bot) ListenToMessages() {
 	for m := range b.messages {
 		go b.Handle(m)
