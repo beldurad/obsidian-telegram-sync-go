@@ -43,7 +43,7 @@ func (h HandlerFunc) Handle(ctx context.Context, u Update) (tgbotapi.MessageConf
 	return h(ctx, u)
 }
 
-type Middleware func(context.Context, Update) func(next Handler) Handler
+type Middleware func(next Handler) Handler
 
 type Bot struct {
 	*tgbotapi.BotAPI
@@ -64,7 +64,7 @@ func (d *Bot) RegisterHandler(h HandleSupporter, middlewares ...Middleware) {
 	handler := func(ctx context.Context, u Update) (tgbotapi.MessageConfig, error) {
 		var curHandler Handler = HandlerFunc(h.Handle)
 		for i := len(middlewares) - 1; i >= 0; i-- {
-			curHandler = middlewares[i](ctx, u)(curHandler)
+			curHandler = middlewares[i](curHandler)
 		}
 		return curHandler.Handle(ctx, u)
 	}
