@@ -10,7 +10,6 @@ import (
 type Config struct {
 	DatabaseConfig `yaml:"db"`
 	TelegramConfig `yaml:"telegram"`
-	GithubConfig   `yaml:"github"`
 }
 
 type DatabaseConfig struct {
@@ -24,12 +23,6 @@ type DatabaseConfig struct {
 
 type TelegramConfig struct {
 	Token string `yaml:"token"`
-}
-
-type GithubConfig struct {
-	Token    string `yaml:"token"`
-	Username string `yaml:"username"`
-	Repo     string `yaml:"repo"`
 }
 
 func MustLoad() Config {
