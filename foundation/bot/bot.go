@@ -2,6 +2,7 @@ package bot
 
 import (
 	"context"
+	"fmt"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
@@ -9,6 +10,8 @@ import (
 const goroutinesPoolSize = 20
 
 const ChatSessionKey = "session"
+
+var ErrInternalServer = fmt.Errorf("Internal Server Error")
 
 type Update struct {
 	// [ChatID], [Text], [ButtonPressed] - common fields for trivial updates
@@ -20,11 +23,24 @@ type Update struct {
 	Raw tgbotapi.Update
 }
 
+func extractUpdate(u tgbotapi.Update) Update {
+	var update Update
+	update.Raw = u
+	update.ChatID = u.FromChat().ID
+	if u.CallbackQuery != nil {
+		update.ButtonPressed = true
+		update.Text = u.CallbackData()
+	} else if u.Message != nil {
+		update.Text = u.Message.Text
+	}
+	return update
+}
+
 type Response struct {
 	Message tgbotapi.Chattable
 
 	// New chat state resulting from the update handling
-	NewChatState ChatState
+	NewChatState *ChatState
 }
 
 type Command string
@@ -42,11 +58,28 @@ type ChatSession struct {
 	ChatID           int64
 	State            ChatState
 	LastBotMessageID int
+
+	container map[string]any
+}
+
+func NewChatSession(chatID int64) *ChatSession {
+	return &ChatSession{
+		ChatID:    chatID,
+		container: make(map[string]any),
+	}
+}
+
+func (s *ChatSession) Set(key string, value any) {
+	s.container[key] = value
+}
+
+func (s *ChatSession) Get(key string) any {
+	return s.container[key]
 }
 
 type ChatSessionService interface {
-	SessionByChatID(chatID int64) ChatSession
-	UpdateSession(chatID int64, new ChatSession)
+	SessionByChatID(chatID int64) (*ChatSession, error)
+	UpdateSession(chatID int64, new *ChatSession) error
 }
 
 type Handler interface {
@@ -158,48 +191,54 @@ func (b *Bot) AddErrorHandler(h ErrorHandler) {
 }
 
 func (b *Bot) handle(ctx context.Context, u tgbotapi.Update) {
+
+	var resp Response
+
 	chat := u.FromChat()
 	if chat == nil {
 		return
 	}
-	var update Update
-	update.Raw = u
-	update.ChatID = chat.ID
-	if u.CallbackQuery != nil {
-		update.ButtonPressed = true
-		update.Text = u.CallbackData()
-	} else if u.Message != nil {
-		update.Text = u.Message.Text
-	} else {
+	update := extractUpdate(u)
+	if update.Text == "" {
 		return
 	}
-	session := b.sessionService.SessionByChatID(chat.ID)
-	state := session.State
+	session, err := b.sessionService.SessionByChatID(chat.ID)
 
-	handler := b.resolveHandler(Command(update.Text), state)
-	if handler == nil {
+	if err != nil {
+		resp = Response{
+			Message: tgbotapi.NewMessage(chat.ID, ErrInternalServer.Error()),
+		}
+		b.tgBot.Send(resp.Message)
 		return
 	}
+
+	handler := b.resolveHandler(Command(update.Text), session.State)
+	if handler == nil {
+		session.State = DefaultChatState
+		b.sessionService.UpdateSession(chat.ID, session)
+		return
+	}
+
 	ctx = context.WithValue(ctx, ChatSessionKey, session)
-	resp, err := handler.Handle(ctx, update)
+	resp, err = handler.Handle(ctx, update)
 	if err != nil {
 		resp = b.errHandle(chat.ID, err)
 	}
 
 	msg, err := b.tgBot.Send(resp.Message)
 
-	var newState ChatState
+	// If an error occurs while sending a response, the program does not save the new session state.
 	if err != nil {
-		newState = DefaultChatState
-	} else {
-		session.LastBotMessageID = msg.MessageID
-		newState = resp.NewChatState
+		return
 	}
 
-	if newState != session.State || err == nil {
-		session.State = newState
-		b.sessionService.UpdateSession(chat.ID, session)
+	session.LastBotMessageID = msg.MessageID
+	newState := resp.NewChatState
+	if newState == nil || *newState == session.State {
+		return
 	}
+	session.State = *newState
+	b.sessionService.UpdateSession(chat.ID, session)
 }
 
 func (b *Bot) StartListening(ctx context.Context) {
