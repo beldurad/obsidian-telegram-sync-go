@@ -3,6 +3,7 @@ package bot
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
@@ -58,23 +59,13 @@ type ChatSession struct {
 	ChatID           int64
 	State            ChatState
 	LastBotMessageID int
-
-	container map[string]any
+	Payload          any
 }
 
 func NewChatSession(chatID int64) *ChatSession {
 	return &ChatSession{
-		ChatID:    chatID,
-		container: make(map[string]any),
+		ChatID: chatID,
 	}
-}
-
-func (s *ChatSession) Set(key string, value any) {
-	s.container[key] = value
-}
-
-func (s *ChatSession) Get(key string) any {
-	return s.container[key]
 }
 
 type ChatSessionService interface {
@@ -140,7 +131,7 @@ type Bot struct {
 	byBoth    map[commonKey]Handler
 }
 
-func New(token string, sessionService ChatSessionService, botClient TelegramBotClient) *Bot {
+func New(sessionService ChatSessionService, botClient TelegramBotClient) *Bot {
 	return &Bot{
 		tgBot:          botClient,
 		sessionService: sessionService,
@@ -241,36 +232,85 @@ func (b *Bot) handle(ctx context.Context, u tgbotapi.Update) {
 	b.sessionService.UpdateSession(chat.ID, session)
 }
 
+type chatLock struct {
+	mu   sync.Mutex
+	refs int
+}
+
+type chatLocks struct {
+	mu    sync.Mutex
+	locks map[int64]*chatLock
+}
+
+func (c *chatLocks) lock(chatID int64) (unlock func()) {
+	c.mu.Lock()
+
+	l, ok := c.locks[chatID]
+	if !ok {
+		l = &chatLock{}
+		c.locks[chatID] = l
+	}
+
+	l.refs++
+	c.mu.Unlock()
+
+	l.mu.Lock()
+
+	unlock = func() {
+		l.mu.Unlock()
+
+		c.mu.Lock()
+		l.refs--
+		if l.refs == 0 {
+			delete(c.locks, chatID)
+		}
+		c.mu.Unlock()
+	}
+	return
+}
+
 func (b *Bot) StartListening(ctx context.Context) {
 	if b.sessionService == nil {
 		panic("Bot needs ChatSessionService - a service to retrieve and save the chat session state")
+	}
+
+	locks := &chatLocks{
+		mu:    sync.Mutex{},
+		locks: make(map[int64]*chatLock),
 	}
 
 	updates := b.tgBot.GetUpdatesChan()
 	done := ctx.Done()
 
 	jobs := make(chan tgbotapi.Update, 100)
+	defer close(jobs)
 
 	for range goroutinesPoolSize {
 		go func() {
-			var u tgbotapi.Update
 			for {
 				select {
 				case <-done:
 					return
-				case u = <-jobs:
+				case u, ok := <-jobs:
+					if !ok {
+						return
+					}
+					chat := u.FromChat()
+					unlock := locks.lock(chat.ID)
 					b.handle(ctx, u)
-
+					unlock()
 				}
 			}
 		}()
 	}
 	for {
-		var u tgbotapi.Update
 		select {
 		case <-done:
 			return
-		case u = <-updates:
+		case u, ok := <-updates:
+			if !ok {
+				return
+			}
 			jobs <- u
 		}
 	}
