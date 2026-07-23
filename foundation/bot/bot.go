@@ -205,8 +205,6 @@ func (b *Bot) handle(ctx context.Context, u tgbotapi.Update) {
 
 	handler := b.resolveHandler(Command(update.Text), session.State)
 	if handler == nil {
-		session.State = DefaultChatState
-		b.sessionService.UpdateSession(chat.ID, session)
 		return
 	}
 
