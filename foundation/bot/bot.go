@@ -8,18 +8,22 @@ import (
 
 const goroutinesPoolSize = 20
 
+const ChatSessionKey = "session"
+
 type Update struct {
+	// [ChatID], [Text], [ButtonPressed] - common fields for trivial updates
 	ChatID        int64
 	Text          string
 	ButtonPressed bool
+
+	// [Update] - for more complex updates
+	Raw tgbotapi.Update
 }
 
-type Button string
-
 type Response struct {
-	Text         string
-	Buttons      [][]Button
-	EditPrevMsg  bool
+	Message tgbotapi.Chattable
+
+	// New chat state resulting from the update handling
 	NewChatState ChatState
 }
 
@@ -37,7 +41,7 @@ const DefaultChatState = ""
 type ChatSession struct {
 	ChatID           int64
 	State            ChatState
-	lastBotMessageID int
+	LastBotMessageID int
 }
 
 type ChatSessionService interface {
@@ -46,35 +50,56 @@ type ChatSessionService interface {
 }
 
 type Handler interface {
-	Handle(context.Context, Update) (error, Response)
+	Handle(context.Context, Update) (Response, error)
 }
 
 type Middleware func(next Handler) Handler
 
 func merge(h Handler, middlewares ...Middleware) Handler {
 	cur := h
-	for _, m := range middlewares {
-		cur = m(cur)
+	for i := len(middlewares) - 1; i >= 0; i-- {
+		cur = middlewares[i](cur)
 	}
 	return cur
 }
 
-type ErrorHandlerFunc func(err error) Response
+type ErrorHandler interface {
+	Match(err error) bool
+	Handle(chatID int64, err error) Response
+}
 
-func defaultErrorHandle() ErrorHandlerFunc {
-	return func(err error) Response {
-		return Response{
-			Text: "Unknown error while handling update",
-		}
+func defaultErrorHandle(chatID int64) Response {
+	return Response{
+		Message: tgbotapi.NewMessage(chatID, "Unknown error while handling message"),
 	}
 }
 
+func (b *Bot) errHandle(chatID int64, err error) Response {
+	for _, h := range b.errorHandlers {
+		if h.Match(err) {
+			return h.Handle(chatID, err)
+		}
+	}
+	return defaultErrorHandle(chatID)
+}
+
+type TelegramBotClient interface {
+	GetUpdatesChan() chan tgbotapi.Update
+	Send(tgbotapi.Chattable) (tgbotapi.Message, error)
+}
+
+// [Bot] is a structure responsible for
+// dispatching updates and errors
+// to the appropriate handlers.
+// Updates are dispatched based on
+// commands or the chat state, which
+// is set by the bot's client.
 type Bot struct {
-	tgBot *tgbotapi.BotAPI
+	tgBot TelegramBotClient
 
-	ChatSessionService
+	sessionService ChatSessionService
 
-	errorHandlers map[error]ErrorHandlerFunc
+	errorHandlers []ErrorHandler
 
 	// Maps for resolving update [Handler]
 	byState   map[ChatState]Handler
@@ -82,13 +107,14 @@ type Bot struct {
 	byBoth    map[commonKey]Handler
 }
 
-func New(token string) *Bot {
-	bot, err := tgbotapi.NewBotAPI(token)
-	if err != nil {
-		panic(err)
-	}
+func New(token string, sessionService ChatSessionService, botClient TelegramBotClient) *Bot {
 	return &Bot{
-		tgBot: bot,
+		tgBot:          botClient,
+		sessionService: sessionService,
+		errorHandlers:  make([]ErrorHandler, 0),
+		byState:        make(map[ChatState]Handler),
+		byCommand:      make(map[Command]Handler),
+		byBoth:         make(map[commonKey]Handler),
 	}
 }
 
@@ -124,19 +150,20 @@ func (b *Bot) resolveHandler(c Command, s ChatState) Handler {
 }
 
 func (b *Bot) SetChatSessionService(s ChatSessionService) {
-	b.ChatSessionService = s
+	b.sessionService = s
 }
 
-func (b *Bot) AddErrorHandler(err error, h ErrorHandlerFunc) {
-	b.errorHandlers[err] = h
+func (b *Bot) AddErrorHandler(h ErrorHandler) {
+	b.errorHandlers = append(b.errorHandlers, h)
 }
 
-func (b *Bot) handle(u tgbotapi.Update) {
+func (b *Bot) handle(ctx context.Context, u tgbotapi.Update) {
 	chat := u.FromChat()
 	if chat == nil {
 		return
 	}
 	var update Update
+	update.Raw = u
 	update.ChatID = chat.ID
 	if u.CallbackQuery != nil {
 		update.ButtonPressed = true
@@ -146,48 +173,66 @@ func (b *Bot) handle(u tgbotapi.Update) {
 	} else {
 		return
 	}
-	session := b.ChatSessionService.SessionByChatID(chat.ID)
+	session := b.sessionService.SessionByChatID(chat.ID)
 	state := session.State
 
 	handler := b.resolveHandler(Command(update.Text), state)
 	if handler == nil {
 		return
 	}
-	ctx := context.Background()
-	err, resp := handler.Handle(ctx, update)
+	ctx = context.WithValue(ctx, ChatSessionKey, session)
+	resp, err := handler.Handle(ctx, update)
 	if err != nil {
-		if errorHandler, ok := b.errorHandlers[err]; ok {
-			resp = errorHandler(err)
-		} else {
-			defHandler := defaultErrorHandle()
-			resp = defHandler(err)
-		}
-	}
-	var msgCfg tgbotapi.Chattable
-	if resp.EditPrevMsg && session.lastBotMessageID > 0 {
-		msgCfg = tgbotapi.NewEditMessageText(chat.ID, int(session.lastBotMessageID), resp.Text)
-	} else {
-		msgCfg = tgbotapi.NewMessage(chat.ID, resp.Text)
+		resp = b.errHandle(chat.ID, err)
 	}
 
-	msg, err := b.tgBot.Send(msgCfg)
-	if err != nil {
-		session.State = DefaultChatState
-	} else {
-		session.lastBotMessageID = msg.MessageID
-		session.State = resp.NewChatState
-	}
-	b.ChatSessionService.UpdateSession(chat.ID, session)
+	msg, err := b.tgBot.Send(resp.Message)
 
+	var newState ChatState
+	if err != nil {
+		newState = DefaultChatState
+	} else {
+		session.LastBotMessageID = msg.MessageID
+		newState = resp.NewChatState
+	}
+
+	if newState != session.State || err == nil {
+		session.State = newState
+		b.sessionService.UpdateSession(chat.ID, session)
+	}
 }
 
-func (b *Bot) StartListening() {
-	goroutinesPool := make(chan int, goroutinesPoolSize)
-	for u := range b.tgBot.GetUpdatesChan(tgbotapi.NewUpdate(0)) {
-		goroutinesPool <- 1
+func (b *Bot) StartListening(ctx context.Context) {
+	if b.sessionService == nil {
+		panic("Bot needs ChatSessionService - a service to retrieve and save the chat session state")
+	}
+
+	updates := b.tgBot.GetUpdatesChan()
+	done := ctx.Done()
+
+	jobs := make(chan tgbotapi.Update, 100)
+
+	for range goroutinesPoolSize {
 		go func() {
-			b.handle(u)
-			<-goroutinesPool
+			var u tgbotapi.Update
+			for {
+				select {
+				case <-done:
+					return
+				case u = <-jobs:
+					b.handle(ctx, u)
+
+				}
+			}
 		}()
+	}
+	for {
+		var u tgbotapi.Update
+		select {
+		case <-done:
+			return
+		case u = <-updates:
+			jobs <- u
+		}
 	}
 }
