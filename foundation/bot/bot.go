@@ -113,7 +113,7 @@ func (b *Bot) errHandle(chatID int64, err error) Response {
 }
 
 type TelegramBotClient interface {
-	GetUpdatesChan() chan tgbotapi.Update
+	GetUpdatesChan() <-chan tgbotapi.Update
 	Send(tgbotapi.Chattable) (tgbotapi.Message, error)
 }
 
