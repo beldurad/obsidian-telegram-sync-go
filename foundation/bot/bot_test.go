@@ -28,7 +28,7 @@ func newTelegramMock() *telegramMock {
 	}
 }
 
-func (m *telegramMock) GetUpdatesChan() chan tgbotapi.Update {
+func (m *telegramMock) GetUpdatesChan() <-chan tgbotapi.Update {
 	return m.updates
 }
 
@@ -96,14 +96,12 @@ func (h *handlerMock) Handle(
 
 func runBot(
 	b *bot.Bot,
-	tg bot.TelegramBotClient,
+	updatesChan chan tgbotapi.Update,
 	updates ...tgbotapi.Update,
 ) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	go b.StartListening(ctx)
-
-	updatesChan := tg.GetUpdatesChan()
 
 	for _, u := range updates {
 		updatesChan <- u
@@ -142,7 +140,7 @@ func TestBot_CommandHandler(t *testing.T) {
 		},
 	}
 
-	runBot(b, tg, update)
+	runBot(b, tg.updates, update)
 
 	assert.True(t, handler.called)
 	assert.Equal(t, int64(123), handler.update.ChatID)
@@ -179,7 +177,7 @@ func TestBot_StateHandler(t *testing.T) {
 		},
 	}
 
-	runBot(b, tg, update)
+	runBot(b, tg.updates, update)
 
 	assert.True(t, handler.called)
 	assert.Equal(t, "Alex", handler.update.Text)
@@ -227,7 +225,7 @@ func TestBot_BothHandlerHasPriority(t *testing.T) {
 		},
 	}
 
-	runBot(b, tg, update)
+	runBot(b, tg.updates, update)
 
 	assert.True(t, bothHandler.called)
 
@@ -264,7 +262,7 @@ func TestBot_StateFallbackWhenBothMissing(t *testing.T) {
 		},
 	}
 
-	runBot(b, tg, update)
+	runBot(b, tg.updates, update)
 
 	assert.True(t, stateHandler.called)
 }
@@ -311,7 +309,7 @@ func TestBot_SessionChangesAfterHandle(t *testing.T) {
 		},
 	}
 
-	runBot(b, tg, update)
+	runBot(b, tg.updates, update)
 
 	assert.Equal(
 		t,
@@ -396,7 +394,7 @@ func TestBot_SessionError(t *testing.T) {
 		},
 	}
 
-	runBot(b, tg, update)
+	runBot(b, tg.updates, update)
 
 	require.Len(t, tg.sent, 1)
 
@@ -451,7 +449,7 @@ func TestBot_ErrorHandlerCalled(t *testing.T) {
 		},
 	}
 
-	runBot(b, tg, update)
+	runBot(b, tg.updates, update)
 
 	assert.True(t, eh.called)
 
@@ -511,7 +509,7 @@ func TestBot_DefaultErrorHandler(t *testing.T) {
 		},
 	}
 
-	runBot(b, tg, update)
+	runBot(b, tg.updates, update)
 
 	require.Len(t, tg.sent, 1)
 
@@ -528,7 +526,7 @@ type failingTelegramMock struct {
 	updates chan tgbotapi.Update
 }
 
-func (m *failingTelegramMock) GetUpdatesChan() chan tgbotapi.Update {
+func (m *failingTelegramMock) GetUpdatesChan() <-chan tgbotapi.Update {
 	return m.updates
 }
 
@@ -608,7 +606,7 @@ func TestBot_SendErrorDoesNotSaveState(t *testing.T) {
 		},
 	}
 
-	runBot(b, tg, update)
+	runBot(b, tg.updates, update)
 
 	assert.False(
 		t,
@@ -676,7 +674,7 @@ func TestBot_ChatsCanBeHandledByOnlyOneHandlerAtATime(t *testing.T) {
 		},
 	}
 
-	runBot(b, tg, update, update)
+	runBot(b, tg.updates, update, update)
 
 	assert.Equal(t, 1, handler.maxHandling)
 }
