@@ -13,6 +13,7 @@ const goroutinesPoolSize = 20
 const ChatSessionKey = "session"
 
 var ErrInternalServer = fmt.Errorf("Internal Server Error")
+var ErrUnknown = fmt.Errorf("Unknown error while handling message")
 
 type Update struct {
 	// [ChatID], [Text], [ButtonPressed] - common fields for trivial updates
@@ -27,7 +28,11 @@ type Update struct {
 func extractUpdate(u tgbotapi.Update) Update {
 	var update Update
 	update.Raw = u
-	update.ChatID = u.FromChat().ID
+	chat := u.FromChat()
+	if chat == nil {
+		return update
+	}
+	update.ChatID = chat.ID
 	if u.CallbackQuery != nil {
 		update.ButtonPressed = true
 		update.Text = u.CallbackData()
@@ -94,7 +99,7 @@ type ErrorHandler interface {
 
 func defaultErrorHandle(chatID int64) Response {
 	return Response{
-		Message: tgbotapi.NewMessage(chatID, "Unknown error while handling message"),
+		Message: tgbotapi.NewMessage(chatID, ErrUnknown.Error()),
 	}
 }
 
