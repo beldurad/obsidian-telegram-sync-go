@@ -47,6 +47,8 @@ type Response struct {
 
 	// New chat state resulting from the update handling
 	NewChatState *ChatState
+
+	NewPayload string
 }
 
 type Command string
@@ -64,7 +66,7 @@ type ChatSession struct {
 	ChatID           int64
 	State            ChatState
 	LastBotMessageID int
-	Payload          any
+	Payload          string
 }
 
 func NewChatSession(chatID int64) *ChatSession {
@@ -232,6 +234,7 @@ func (b *Bot) handle(ctx context.Context, u tgbotapi.Update) {
 		return
 	}
 	session.State = *newState
+	session.Payload = resp.NewPayload
 	b.sessionService.UpdateSession(chat.ID, session)
 }
 
