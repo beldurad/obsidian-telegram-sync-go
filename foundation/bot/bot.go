@@ -60,7 +60,7 @@ type commonKey struct {
 
 type ChatState string
 
-const DefaultChatState = ""
+var DefaultChatState = ChatState("")
 
 type ChatSession struct {
 	ChatID           int64
@@ -82,6 +82,12 @@ type ChatSessionService interface {
 
 type Handler interface {
 	Handle(context.Context, Update) (Response, error)
+}
+
+type HandlerFunc func(context.Context, Update) (Response, error)
+
+func (f HandlerFunc) Handle(ctx context.Context, u Update) (Response, error) {
+	return f(ctx, u)
 }
 
 type Middleware func(next Handler) Handler
