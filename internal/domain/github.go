@@ -7,8 +7,10 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -16,11 +18,11 @@ import (
 )
 
 type GithubUser struct {
-	Username string
+	Username string `json:"login"`
 }
 
 type GithubRepo struct {
-	Name string
+	Name string `json:"name"`
 }
 
 type OAuthContext struct {
@@ -106,21 +108,10 @@ func (s *OAuthService) Client(ctx context.Context, chatID int64) (*GithubClient,
 }
 
 // ======== CLIENT =========
-const baseURL = "https://api.github.com/repos/"
-
-func toFullURL(owner string, repo string, path string) string {
-	res, err := url.JoinPath(baseURL, owner, repo, "contents", path)
-	if err != nil {
-		panic("Wrong URL")
-	}
-	return res
-}
+const baseURL = "https://api.github.com/"
 
 func base64Convert(raw string) string {
-	data := []byte(raw)
-	dst := make([]byte, base64.StdEncoding.EncodedLen(len(data)))
-	base64.StdEncoding.Encode(dst, data)
-	return string(data)
+	return base64.StdEncoding.EncodeToString([]byte(raw))
 }
 
 type CreateRequest struct {
@@ -143,7 +134,10 @@ func update(ctx context.Context, client *http.Client, r CreateRequest) (*http.Re
 
 	r.Content = base64Convert(r.Content)
 
-	url := toFullURL(r.Owner, r.Repo, r.Path)
+	fullURL, err := url.JoinPath(baseURL, "repos", r.Owner, r.Repo, "contents", r.Path)
+	if err != nil {
+		return nil, err
+	}
 
 	byteSlice, err := json.Marshal(r)
 	if err != nil {
@@ -153,7 +147,7 @@ func update(ctx context.Context, client *http.Client, r CreateRequest) (*http.Re
 	req, err := http.NewRequestWithContext(
 		ctx,
 		http.MethodPut,
-		url,
+		fullURL,
 		bytes.NewReader(byteSlice),
 	)
 	if err != nil {
@@ -196,8 +190,10 @@ type GetDirRequest struct {
 }
 
 type DirElem struct {
-	Type string `json:"type"`
-	Name string `json:"name"`
+	Type    string `json:"type"`
+	Name    string `json:"name"`
+	Content string `json:"content"`
+	Sha     string `json:"sha"`
 }
 
 const (
@@ -206,20 +202,159 @@ const (
 )
 
 func (c *GithubClient) UserInfo() (GithubUser, error) {
-	panic("")
+	fullURL, err := url.JoinPath(baseURL, "user")
+	if err != nil {
+		return GithubUser{}, err
+	}
+	resp, err := c.client.Get(fullURL)
+	if err != nil {
+		return GithubUser{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return GithubUser{}, ErrNotSuccessfulResp
+	}
+	decoder := json.NewDecoder(resp.Body)
+	var user GithubUser
+
+	if err := decoder.Decode(&user); err != nil {
+		return GithubUser{}, err
+	}
+	return user, nil
 }
-func (c *GithubClient) UserRepos(username string, pageNum int) (Page[GithubRepo], error) {
-	panic("")
+func (c *GithubClient) UserRepos(username string, pageNum int, pageSize int) (Page[GithubRepo], error) {
+	fullURL, err := url.JoinPath(baseURL, "user", "repos")
+	if err != nil {
+		return Page[GithubRepo]{}, err
+	}
+	resp, err := c.client.Get(fullURL)
+	if err != nil {
+		return Page[GithubRepo]{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return Page[GithubRepo]{}, ErrNotSuccessfulResp
+	}
+	decoder := json.NewDecoder(resp.Body)
+	var repos []GithubRepo
+	if err := decoder.Decode(&repos); err != nil {
+		return Page[GithubRepo]{}, err
+	}
+	if len(repos) == 0 {
+		return Page[GithubRepo]{}, nil
+	}
+	leftBound := min(pageNum*pageSize, len(repos))
+	rightBound := min(pageNum*pageSize+pageSize, len(repos))
+	totalPages := int(math.Ceil(float64(len(repos)) / float64(pageSize)))
+	if leftBound >= rightBound {
+		return Page[GithubRepo]{TotalPages: totalPages}, nil
+	}
+
+	return Page[GithubRepo]{
+		Values:     repos[leftBound:rightBound],
+		TotalPages: totalPages,
+	}, nil
 }
 
 func (c *GithubClient) RepoExists(owner, repo string) (bool, error) {
-	panic("")
+	fullURL, err := url.JoinPath(baseURL, "repos", owner, repo)
+	if err != nil {
+		return false, err
+	}
+	resp, err := c.client.Get(fullURL)
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode == http.StatusOK, nil
 }
 
-func (c *GithubClient) Directory(owner, repo, path string, pageNum int) (Page[DirElem], error) {
-	panic("")
+func (c *GithubClient) Directory(owner, repo, path string, pageNum int, pageSize int) (Page[DirElem], error) {
+	fullURL, err := url.JoinPath(baseURL, "repos", owner, repo, "contents", path)
+	if err != nil {
+		return Page[DirElem]{}, err
+	}
+
+	resp, err := c.client.Get(fullURL)
+	if err != nil {
+		return Page[DirElem]{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return Page[DirElem]{}, ErrNotSuccessfulResp
+	}
+	var dir []DirElem
+
+	decoder := json.NewDecoder(resp.Body)
+
+	if err := decoder.Decode(&dir); err != nil {
+		return Page[DirElem]{}, err
+	}
+	leftBound := min(pageNum*pageSize, len(dir)-1)
+	rightBound := min(pageNum*pageSize+pageSize, len(dir))
+	totalPages := int(math.Ceil(float64(len(dir)) / float64(pageSize)))
+
+	return Page[DirElem]{
+		TotalPages: totalPages,
+		Values:     dir[leftBound:rightBound],
+	}, nil
+
 }
 
-func (c *GithubClient) SaveNote(owner, repo string, note Note) error {
-	panic("")
+func (c *GithubClient) File(owner, repo, path string) (DirElem, error) {
+	fullURL, err := url.JoinPath(baseURL, "repos", owner, repo, "contents", path)
+	if err != nil {
+		return DirElem{}, err
+	}
+
+	resp, err := c.client.Get(fullURL)
+	if err != nil {
+		return DirElem{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return DirElem{}, ErrNotSuccessfulResp
+	}
+	var file DirElem
+
+	decoder := json.NewDecoder(resp.Body)
+
+	if err := decoder.Decode(&file); err != nil {
+		return DirElem{}, err
+	}
+
+	return file, nil
+}
+
+func (c *GithubClient) SaveNote(ctx context.Context, owner, repo string, note Note) error {
+	file, err := c.File(owner, repo, note.Path)
+	if err == nil && file.Type == TypeFile {
+		raw, err := base64.StdEncoding.DecodeString(file.Content)
+		if err != nil {
+			return err
+		}
+		return c.UpdateFile(ctx, CreateRequest{
+			Owner:   owner,
+			Repo:    repo,
+			Path:    note.Path,
+			Message: "update note",
+			Content: renderNoteContent(string(raw), note.Text),
+			Sha:     file.Sha,
+		})
+	}
+
+	return c.CreateFile(ctx, CreateRequest{
+		Owner:   owner,
+		Repo:    repo,
+		Path:    note.Path,
+		Message: "create note",
+		Content: renderNoteContent(note.Template, note.Text),
+	})
+}
+
+func renderNoteContent(template, text string) string {
+	if strings.Contains(template, "{}") {
+		return strings.ReplaceAll(template, "{}", text)
+	}
+	return text
 }

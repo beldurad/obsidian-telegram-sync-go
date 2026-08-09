@@ -6,22 +6,23 @@ import (
 	"math"
 
 	"github.com/beldurad/obsidian-telegram-sync-go/internal/domain"
+	"github.com/google/uuid"
 )
 
-type TemplatePageNumCache interface {
+type TemplatePageCountCache interface {
 	Put(ctx context.Context, chatID int64, pageSize, count int) error
 	Get(ctx context.Context, chatID int64, pageSize int) (count int, ok bool)
 }
 
 type TemplateStorage struct {
-	db           *sql.DB
-	pageNumCache TemplatePageNumCache
+	db             *sql.DB
+	pageCountCache TemplatePageCountCache
 }
 
-func NewTemplateStorage(db *sql.DB, pageNumCache TemplatePageNumCache) *TemplateStorage {
+func NewTemplateStorage(db *sql.DB, pageNumCache TemplatePageCountCache) *TemplateStorage {
 	return &TemplateStorage{
-		db:           db,
-		pageNumCache: pageNumCache,
+		db:             db,
+		pageCountCache: pageNumCache,
 	}
 }
 
@@ -49,17 +50,21 @@ func (s *TemplateStorage) Save(ctx context.Context, t domain.Template) error {
 	if err := tx.Commit(); err != nil {
 		return err
 	}
+
+	oldCount, ok := s.pageCountCache.Get(ctx, t.ChatID, domain.DefaultPageSize)
+	if !ok {
+		return nil
+	}
+	if err := s.pageCountCache.Put(ctx, t.ChatID, domain.DefaultPageSize, oldCount+1); err != nil {
+		return err
+	}
 	return nil
 }
 
 func (s *TemplateStorage) TemplatesPage(ctx context.Context, chatID int64, pageNum, pageSize int) (domain.Page[domain.Template], error) {
 	page := domain.Page[domain.Template]{}
 
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return page, err
-	}
-	if pageNum, ok := s.pageNumCache.Get(ctx, chatID, pageSize); ok {
+	if pageNum, ok := s.pageCountCache.Get(ctx, chatID, pageSize); ok {
 		page.TotalPages = pageNum
 	} else {
 		const countQuery = `
@@ -68,7 +73,7 @@ func (s *TemplateStorage) TemplatesPage(ctx context.Context, chatID int64, pageN
 		WHERE chat_id = $1
 		`
 		var count int
-		err := tx.QueryRowContext(
+		err := s.db.QueryRowContext(
 			ctx,
 			countQuery, chatID,
 		).Scan(&count)
@@ -80,7 +85,7 @@ func (s *TemplateStorage) TemplatesPage(ctx context.Context, chatID int64, pageN
 				float64(count) / float64(pageSize),
 			),
 		)
-		s.pageNumCache.Put(ctx, chatID, pageSize, page.TotalPages)
+		s.pageCountCache.Put(ctx, chatID, pageSize, page.TotalPages)
 	}
 	offset := pageNum * pageSize
 	limit := pageSize
@@ -91,7 +96,10 @@ func (s *TemplateStorage) TemplatesPage(ctx context.Context, chatID int64, pageN
 	OFFSET $2
 	LIMIT $3
 	`
-	rows, err := tx.QueryContext(ctx, query, chatID, offset, limit)
+	rows, err := s.db.QueryContext(ctx, query, chatID, offset, limit)
+	if err != nil {
+		return domain.Page[domain.Template]{}, err
+	}
 	templates := make([]domain.Template, pageSize)
 	cur := 0
 	defer rows.Close()
@@ -108,6 +116,26 @@ func (s *TemplateStorage) TemplatesPage(ctx context.Context, chatID int64, pageN
 		}
 		cur++
 	}
-	page.Values = templates
+	page.Values = templates[:cur]
 	return page, nil
+}
+
+func (s *TemplateStorage) Template(ctx context.Context, id string, chatID int64) (domain.Template, error) {
+	const query = `
+	SELECT chat_id, name, value, created_at
+	FROM template
+	WHERE id = $1 AND chat_id = $2
+	`
+
+	var template domain.Template
+
+	if err := s.db.QueryRowContext(ctx, query, id, chatID).Scan(&template.ChatID, &template.Name, &template.Value, &template.CreatedAt); err != nil {
+		return domain.Template{}, err
+	}
+	parsedID, err := uuid.Parse(id)
+	if err != nil {
+		return domain.Template{}, err
+	}
+	template.ID = parsedID
+	return template, nil
 }

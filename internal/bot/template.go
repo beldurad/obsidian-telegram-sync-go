@@ -14,7 +14,7 @@ import (
 
 // ===== STATES =====
 
-var StateTemplateGet bot.ChatState = "TEMPLATE_GET"
+var StateGetTemplate bot.ChatState = "TEMPLATE_GET"
 
 var (
 	StateWaitTemplateValue = bot.ChatState("WAITING_TEMPLATE_VALUE")
@@ -24,14 +24,14 @@ var (
 // ===== COMMANDS =====
 
 const (
-	CommandGetTemplates   = "/template"
-	CommandCreateTemplate = "/add-template"
+	CommandGetTemplates = "/template"
+	CommandAddTemplate  = "/add-template"
 )
 
 // ===== GET TEMPLATE =====
 
 type TemplateGetter interface {
-	Templates(ctx context.Context, chatID int64, pageNum int) (domain.Page[domain.Template], error)
+	TemplatesPage(ctx context.Context, chatID int64, pageNum, pageSize int) (domain.Page[domain.Template], error)
 }
 
 type GetTemplateHandler struct {
@@ -67,10 +67,11 @@ func (h *GetTemplateHandler) Handle(ctx context.Context, u bot.Update) (bot.Resp
 		}
 	}
 
-	templatesPage, err := h.getter.Templates(
+	templatesPage, err := h.getter.TemplatesPage(
 		ctx,
 		chatSession.ChatID,
 		payload.PageNum,
+		domain.DefaultPageSize,
 	)
 	if err != nil {
 		return bot.Response{}, err
@@ -124,24 +125,30 @@ func (h *GetTemplateHandler) Handle(ctx context.Context, u bot.Update) (bot.Resp
 
 	bytes, err := json.Marshal(payload)
 	if err != nil {
-		return bot.Response{}, nil
+		return bot.Response{}, err
 	}
 
 	return bot.Response{
 		Message:      c,
-		NewChatState: &StateTemplateGet,
+		NewChatState: &StateGetTemplate,
 		NewPayload:   string(bytes),
 	}, nil
 }
 
 // ===== CREATE TEMPLATE
 
-type TemplateAdder interface {
-	Add(domain.Template) error
+type TemplateSaver interface {
+	Save(ctx context.Context, t domain.Template) error
 }
 
 type TemplateAddHandler struct {
-	adder TemplateAdder
+	saver TemplateSaver
+}
+
+func NewTemplateAddHandler(saver TemplateSaver) *TemplateAddHandler {
+	return &TemplateAddHandler{
+		saver: saver,
+	}
 }
 
 type templateBuilder struct {
@@ -156,7 +163,7 @@ func newTemplateBuilder(chatID int64) templateBuilder {
 	return templateBuilder{
 		ID:        uuid.NewString(),
 		ChatID:    chatID,
-		CreatedAt: time.Now().Format("YYYY-MM-DD"),
+		CreatedAt: time.Now().Format(time.DateOnly),
 	}
 }
 
@@ -165,7 +172,7 @@ func (p templateBuilder) toTemplate() (domain.Template, error) {
 	if err != nil {
 		return domain.Template{}, err
 	}
-	createdAt, err := time.Parse("YYYY-MM-DD", p.CreatedAt)
+	createdAt, err := time.Parse(time.DateOnly, p.CreatedAt)
 	if err != nil {
 		return domain.Template{}, err
 	}
@@ -188,7 +195,7 @@ func (a *TemplateAddHandler) Handle(ctx context.Context, u bot.Update) (bot.Resp
 		return a.handleValue(chatID, u.Text, payload)
 	}
 	if state == StateWaitTemplateName {
-		return a.handleName(chatID, u.Text, payload)
+		return a.handleName(ctx, chatID, u.Text, payload)
 	}
 	return a.handleDefault(chatID)
 }
@@ -197,7 +204,7 @@ func (a *TemplateAddHandler) handleDefault(chatID int64) (bot.Response, error) {
 	payload := newTemplateBuilder(chatID)
 	bytes, err := json.Marshal(payload)
 	if err != nil {
-		return bot.Response{}, nil
+		return bot.Response{}, err
 	}
 	return bot.Response{
 		Message: tgbotapi.NewMessage(
@@ -218,7 +225,7 @@ func (a *TemplateAddHandler) handleValue(chatID int64, value string, rawPayload 
 	payload.Value = value
 	bytes, err := json.Marshal(payload)
 	if err != nil {
-		return bot.Response{}, nil
+		return bot.Response{}, err
 	}
 	return bot.Response{
 		Message: tgbotapi.NewMessage(
@@ -232,7 +239,7 @@ func (a *TemplateAddHandler) handleValue(chatID int64, value string, rawPayload 
 	}, nil
 }
 
-func (a *TemplateAddHandler) handleName(chatID int64, name string, rawPayload string) (bot.Response, error) {
+func (a *TemplateAddHandler) handleName(ctx context.Context, chatID int64, name string, rawPayload string) (bot.Response, error) {
 	var payload templateBuilder
 	err := json.Unmarshal([]byte(rawPayload), &payload)
 	if err != nil {
@@ -243,7 +250,7 @@ func (a *TemplateAddHandler) handleName(chatID int64, name string, rawPayload st
 	if err != nil {
 		return bot.Response{}, err
 	}
-	err = a.adder.Add(template)
+	err = a.saver.Save(ctx, template)
 	if err != nil {
 		return bot.Response{}, err
 	}

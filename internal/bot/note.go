@@ -3,6 +3,7 @@ package bot
 import (
 	"context"
 	"encoding/json"
+	"strings"
 
 	"github.com/beldurad/obsidian-telegram-sync-go/foundation/bot"
 	"github.com/beldurad/obsidian-telegram-sync-go/internal/domain"
@@ -15,6 +16,7 @@ var (
 	StateNoteWaitAlias    = bot.ChatState("NOTE_WAITING_ALIAS")
 	StateNoteWaitTemplate = bot.ChatState("NOTE_WAITING_TEMPLATE")
 	StateNoteWaitText     = bot.ChatState("NOTE_WAITING_TEXT")
+	StateNoteWaitFilename = bot.ChatState("NOTE_WAITING_FILENAME")
 )
 
 // ===== COMMANDS =====
@@ -26,13 +28,13 @@ const (
 // ===== ADD NOTE =====
 
 type AliasService interface {
-	Aliases(ctx context.Context, chatID int64, pageNum int) (domain.Page[domain.Alias], error)
-	Alias(ctx context.Context, id string) (domain.Alias, error)
+	AliasPage(ctx context.Context, chatID int64, pageNum, pageSize int) (domain.Page[domain.Alias], error)
+	Alias(ctx context.Context, id string, chatID int64) (domain.Alias, error)
 }
 
 type TemplateService interface {
-	Templates(ctx context.Context, chatID int64, pageNum int) (domain.Page[domain.Template], error)
-	Template(ctx context.Context, id string) (domain.Template, error)
+	TemplatesPage(ctx context.Context, chatID int64, pageNum, pageSize int) (domain.Page[domain.Template], error)
+	Template(ctx context.Context, id string, chatID int64) (domain.Template, error)
 }
 
 type noteAddPayload struct {
@@ -77,6 +79,8 @@ func (a *AddNoteHandler) Handle(ctx context.Context, u bot.Update) (bot.Response
 		return a.handleWaitTemplate(ctx, session, u)
 	case StateNoteWaitText:
 		return a.handleWaitText(ctx, session, u)
+	case StateNoteWaitFilename:
+		return a.handleWaitFilename(ctx, session, u)
 	default:
 		return a.handleWaitAlias(ctx, session, u)
 	}
@@ -96,7 +100,7 @@ func (a *AddNoteHandler) handleWaitAlias(ctx context.Context, s bot.ChatSession,
 	} else if u.Raw.CallbackData() == PrevPageCommand {
 		payload.PageNum--
 	} else if s.State != bot.DefaultChatState {
-		alias, err := a.aliasService.Alias(ctx, u.Raw.CallbackData())
+		alias, err := a.aliasService.Alias(ctx, u.Raw.CallbackData(), u.ChatID)
 		if err != nil {
 			return bot.Response{}, err
 		}
@@ -148,7 +152,7 @@ func (a *AddNoteHandler) handleWaitAlias(ctx context.Context, s bot.ChatSession,
 }
 
 func (a *AddNoteHandler) aliasButtons(ctx context.Context, s bot.ChatSession, pageNum int) (tgbotapi.InlineKeyboardMarkup, error) {
-	aliases, err := a.aliasService.Aliases(ctx, s.ChatID, pageNum)
+	aliases, err := a.aliasService.AliasPage(ctx, s.ChatID, pageNum, domain.DefaultPageSize)
 	if err != nil {
 		return tgbotapi.InlineKeyboardMarkup{}, err
 	}
@@ -189,14 +193,14 @@ func (a *AddNoteHandler) handleWaitTemplate(ctx context.Context, s bot.ChatSessi
 	if err != nil {
 		return bot.Response{}, err
 	}
-	payload := notePayload.TemplatePage
+	payload := &notePayload.TemplatePage
 
 	if u.Raw.CallbackData() == NextPageCommand {
 		payload.PageNum++
 	} else if u.Raw.CallbackData() == PrevPageCommand {
 		payload.PageNum--
 	} else if s.State != bot.DefaultChatState {
-		template, err := a.templateService.Template(ctx, u.Raw.CallbackData())
+		template, err := a.templateService.Template(ctx, u.Raw.CallbackData(), u.ChatID)
 		if err != nil {
 			return bot.Response{}, err
 		}
@@ -222,7 +226,7 @@ func (a *AddNoteHandler) handleWaitTemplate(ctx context.Context, s bot.ChatSessi
 	}
 
 	msgCfg := tgbotapi.NewEditMessageTextAndMarkup(s.ChatID, s.LastBotMessageID, "Выберите путь", buttons)
-	bytes, err := json.Marshal(payload)
+	bytes, err := json.Marshal(notePayload)
 	if err != nil {
 		return bot.Response{}, err
 	}
@@ -233,7 +237,7 @@ func (a *AddNoteHandler) handleWaitTemplate(ctx context.Context, s bot.ChatSessi
 }
 
 func (a *AddNoteHandler) templateButtons(ctx context.Context, s bot.ChatSession, pageNum int) (tgbotapi.InlineKeyboardMarkup, error) {
-	templates, err := a.templateService.Templates(ctx, s.ChatID, pageNum)
+	templates, err := a.templateService.TemplatesPage(ctx, s.ChatID, pageNum, domain.DefaultPageSize)
 	if err != nil {
 		return tgbotapi.InlineKeyboardMarkup{}, err
 	}
@@ -286,7 +290,22 @@ func (a *AddNoteHandler) handleWaitText(ctx context.Context, s bot.ChatSession, 
 	if err != nil {
 		return bot.Response{}, err
 	}
-	if err := client.SaveNote(vault.Owner, vault.Repo, note); err != nil {
+
+	file, err := client.File(vault.Owner, vault.Repo, note.Path)
+	if err != nil || file.Type != domain.TypeFile {
+		bytes, err := json.Marshal(notePayload)
+		if err != nil {
+			return bot.Response{}, err
+		}
+		msgCfg := tgbotapi.NewMessage(s.ChatID, "Введите название файла")
+		return bot.Response{
+			Message:      msgCfg,
+			NewChatState: &StateNoteWaitFilename,
+			NewPayload:   string(bytes),
+		}, nil
+	}
+
+	if err := a.saveNote(ctx, s.ChatID, note); err != nil {
 		return bot.Response{}, err
 	}
 	msgCfg := tgbotapi.NewMessage(s.ChatID, "Заметка успешно сохранена")
@@ -295,4 +314,39 @@ func (a *AddNoteHandler) handleWaitText(ctx context.Context, s bot.ChatSession, 
 		NewChatState: &bot.DefaultChatState,
 	}, nil
 
+}
+
+func (a *AddNoteHandler) handleWaitFilename(ctx context.Context, s bot.ChatSession, u bot.Update) (bot.Response, error) {
+	notePayload := noteAddPayload{}
+	raw := s.Payload
+	if err := json.Unmarshal([]byte(raw), &notePayload); err != nil {
+		return bot.Response{}, err
+	}
+
+	notePayload.Path = strings.TrimSuffix(notePayload.Path, "/")
+	if notePayload.Path != "" {
+		notePayload.Path += "/"
+	}
+	notePayload.Path += u.Text
+
+	if err := a.saveNote(ctx, s.ChatID, notePayload.toNote()); err != nil {
+		return bot.Response{}, err
+	}
+	msgCfg := tgbotapi.NewMessage(s.ChatID, "Заметка успешно сохранена")
+	return bot.Response{
+		Message:      msgCfg,
+		NewChatState: &bot.DefaultChatState,
+	}, nil
+}
+
+func (a *AddNoteHandler) saveNote(ctx context.Context, chatID int64, note domain.Note) error {
+	client, err := a.client.Client(ctx, chatID)
+	if err != nil {
+		return err
+	}
+	vault, err := a.vault.Vault(ctx, chatID)
+	if err != nil {
+		return err
+	}
+	return client.SaveNote(ctx, vault.Owner, vault.Repo, note)
 }

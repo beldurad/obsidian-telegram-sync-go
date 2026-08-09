@@ -6,22 +6,23 @@ import (
 	"math"
 
 	"github.com/beldurad/obsidian-telegram-sync-go/internal/domain"
+	"github.com/google/uuid"
 )
 
-type AliasPageNumCache interface {
+type AliasPageCountCache interface {
 	Put(ctx context.Context, chatID int64, pageSize, count int) error
 	Get(ctx context.Context, chatID int64, pageSize int) (count int, ok bool)
 }
 
 type AliasStorage struct {
-	db           *sql.DB
-	pageNumCache TemplatePageNumCache
+	db             *sql.DB
+	pageCountCache TemplatePageCountCache
 }
 
-func NewAliasStorage(db *sql.DB, pageNumCache AliasPageNumCache) *AliasStorage {
+func NewAliasStorage(db *sql.DB, pageCountCache AliasPageCountCache) *AliasStorage {
 	return &AliasStorage{
-		db:           db,
-		pageNumCache: pageNumCache,
+		db:             db,
+		pageCountCache: pageCountCache,
 	}
 }
 
@@ -49,17 +50,19 @@ func (s *AliasStorage) Save(ctx context.Context, a domain.Alias) error {
 	if err := tx.Commit(); err != nil {
 		return err
 	}
+	oldCount, ok := s.pageCountCache.Get(ctx, a.ChatID, domain.DefaultPageSize)
+	if !ok {
+		return nil
+	}
+	if err := s.pageCountCache.Put(ctx, a.ChatID, domain.DefaultPageSize, oldCount+1); err != nil {
+		return err
+	}
 	return nil
 }
 
 func (s *AliasStorage) AliasPage(ctx context.Context, chatID int64, pageNum, pageSize int) (domain.Page[domain.Alias], error) {
 	page := domain.Page[domain.Alias]{}
-
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return page, err
-	}
-	if pageNum, ok := s.pageNumCache.Get(ctx, chatID, pageSize); ok {
+	if pageNum, ok := s.pageCountCache.Get(ctx, chatID, pageSize); ok {
 		page.TotalPages = pageNum
 	} else {
 		const countQuery = `
@@ -68,7 +71,7 @@ func (s *AliasStorage) AliasPage(ctx context.Context, chatID int64, pageNum, pag
 		WHERE chat_id = $1
 		`
 		var count int
-		err := tx.QueryRowContext(
+		err := s.db.QueryRowContext(
 			ctx,
 			countQuery, chatID,
 		).Scan(&count)
@@ -80,7 +83,7 @@ func (s *AliasStorage) AliasPage(ctx context.Context, chatID int64, pageNum, pag
 				float64(count) / float64(pageSize),
 			),
 		)
-		s.pageNumCache.Put(ctx, chatID, pageSize, page.TotalPages)
+		s.pageCountCache.Put(ctx, chatID, pageSize, page.TotalPages)
 	}
 	offset := pageNum * pageSize
 	limit := pageSize
@@ -91,7 +94,10 @@ func (s *AliasStorage) AliasPage(ctx context.Context, chatID int64, pageNum, pag
 	OFFSET $2
 	LIMIT $3
 	`
-	rows, err := tx.QueryContext(ctx, query, chatID, offset, limit)
+	rows, err := s.db.QueryContext(ctx, query, chatID, offset, limit)
+	if err != nil {
+		return domain.Page[domain.Alias]{}, err
+	}
 	templates := make([]domain.Alias, pageSize)
 	cur := 0
 	defer rows.Close()
@@ -110,4 +116,22 @@ func (s *AliasStorage) AliasPage(ctx context.Context, chatID int64, pageNum, pag
 	}
 	page.Values = templates
 	return page, nil
+}
+
+func (s *AliasStorage) Alias(ctx context.Context, id string, chatID int64) (domain.Alias, error) {
+	const query = `
+	SELECT chat_id, path, alias
+	FROM alias
+	WHERE id = $1 AND chat_id = $2
+	`
+	var alias domain.Alias
+	if err := s.db.QueryRowContext(ctx, query, id, chatID).Scan(&alias.ChatID, &alias.Path, &alias.Alias); err != nil {
+		return domain.Alias{}, err
+	}
+	if id, err := uuid.Parse(id); err != nil {
+		return domain.Alias{}, err
+	} else {
+		alias.ID = id
+	}
+	return alias, nil
 }

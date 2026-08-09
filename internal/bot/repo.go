@@ -64,7 +64,7 @@ func (h *RepoSetHandler) Handle(ctx context.Context, u bot.Update) (bot.Response
 	if state != bot.DefaultChatState &&
 		!slices.Contains(RepoSetCommands, u.Raw.CallbackData()) {
 
-		h.handleChosenRepo(ctx, session, client, u.Raw.CallbackData(), user.Username)
+		return h.handleChosenRepo(ctx, session, client, u.Raw.CallbackData(), user.Username)
 	}
 
 	var payload pagePayload
@@ -79,13 +79,14 @@ func (h *RepoSetHandler) Handle(ctx context.Context, u bot.Update) (bot.Response
 		if err != nil {
 			return bot.Response{}, err
 		}
-		if u.Text == NextPageCommand {
+		switch u.Text {
+		case NextPageCommand:
 			payload.PageNum++
-		} else if u.Text == PrevPageCommand {
+		case PrevPageCommand:
 			payload.PageNum--
 		}
 	}
-	repoPage, err := client.UserRepos(user.Username, payload.PageNum)
+	repoPage, err := client.UserRepos(user.Username, payload.PageNum, domain.DefaultPageSize)
 	if err != nil {
 		return bot.Response{}, err
 	}
@@ -123,7 +124,7 @@ func (h *RepoSetHandler) Handle(ctx context.Context, u bot.Update) (bot.Response
 
 	bytes, err := json.Marshal(payload)
 	if err != nil {
-		return bot.Response{}, nil
+		return bot.Response{}, err
 	}
 
 	return bot.Response{
@@ -157,7 +158,7 @@ func (h *RepoSetHandler) handleChosenRepo(ctx context.Context, session bot.ChatS
 		Repo:   repo,
 	}
 	if err := h.vaultService.Save(ctx, vault); err != nil {
-		return bot.Response{}, nil
+		return bot.Response{}, err
 	}
 	msgCfg := tgbotapi.NewEditMessageText(
 		chatID,
@@ -174,7 +175,7 @@ func (h *RepoSetHandler) RepoSetMiddleware() bot.Middleware {
 		return bot.HandlerFunc(func(ctx context.Context, u bot.Update) (bot.Response, error) {
 			exists, err := h.vaultService.ExistsByChatID(ctx, u.ChatID)
 			if err != nil {
-				return bot.Response{}, nil
+				return bot.Response{}, err
 			}
 			if !exists {
 				return bot.Response{

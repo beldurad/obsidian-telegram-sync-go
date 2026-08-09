@@ -13,6 +13,10 @@ import (
 
 const StateWaitingRepo = "WAITING_REPO"
 
+// ===== COMMANDS =====
+
+var CommandStart = bot.Command("/start")
+
 // ===== AUTH =====
 
 type AuthService interface {
@@ -43,7 +47,7 @@ func (h *AuthHandler) Handle(ctx context.Context, u bot.Update) (bot.Response, e
 func (h *AuthHandler) startAuth(ctx context.Context, chatSession bot.ChatSession) (bot.Response, error) {
 	url, err := h.authService.GenerateAuthURL(ctx, chatSession.ChatID)
 	if err != nil {
-		return bot.Response{}, nil
+		return bot.Response{}, err
 	}
 
 	msgCfg := tgbotapi.NewMessage(chatSession.ChatID, fmt.Sprintf("Перейдите по этой ссылке для Github-авторизации: %s", url))

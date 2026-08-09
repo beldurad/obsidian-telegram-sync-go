@@ -1,0 +1,50 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_DB: postgres
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_pass
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    secrets:
+      - db_pass
+
+  app:
+    build: .
+    environment:
+      CONFIG_PATH: /app/config/local.yaml
+      SECRETS_DIR: /run/secrets
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./config:/app/config
+      - ./sql:/app/sql
+    ports:
+      - "8090:8090"
+    secrets:
+      - db_pass
+      - tg_token
+      - github_id
+      - github_secret
+
+secrets:
+  db_pass:
+    file: ./secret/db_pass
+  tg_token:
+    file: ./secret/tg_token
+  github_id:
+    file: ./secret/github_id
+  github_secret:
+    file: ./secret/github_secret
+
+volumes:
+  pgdata:

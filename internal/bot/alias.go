@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/beldurad/obsidian-telegram-sync-go/foundation/bot"
@@ -24,19 +25,19 @@ var (
 
 // ===== COMMANDS =====
 
-const (
-	CommandGetAliases = "/template"
+var (
+	CommandGetAliases = bot.Command("/alias")
 
-	CommandAddAlias = "/add-alias"
+	CommandAddAlias = bot.Command("/add-alias")
 
-	prevPathCommand   = ".."
-	currentDirCommand = "*"
+	prevPathCommand   = bot.Command("..")
+	currentDirCommand = bot.Command("*")
 )
 
 // ===== GET ALIASES =====
 
 type AliasesGetter interface {
-	Aliases(ctx context.Context, chatID int64, pageNum int) (domain.Page[domain.Alias], error)
+	AliasPage(ctx context.Context, chatID int64, pageNum, pageSize int) (domain.Page[domain.Alias], error)
 }
 
 type GetAliasesHandler struct {
@@ -63,14 +64,15 @@ func (h *GetAliasesHandler) Handle(ctx context.Context, u bot.Update) (bot.Respo
 		if u.Text == NextPageCommand {
 			payload.PageNum++
 		} else {
-			payload.PageNum--
+			payload.PageNum = max(0, payload.PageNum-1)
 		}
 	}
 
-	aliasesPage, err := h.getter.Aliases(
+	aliasesPage, err := h.getter.AliasPage(
 		ctx,
 		session.ChatID,
 		payload.PageNum,
+		domain.DefaultPageSize,
 	)
 	if err != nil {
 		return bot.Response{}, err
@@ -125,7 +127,7 @@ func (h *GetAliasesHandler) Handle(ctx context.Context, u bot.Update) (bot.Respo
 
 	bytes, err := json.Marshal(payload)
 	if err != nil {
-		return bot.Response{}, nil
+		return bot.Response{}, err
 	}
 
 	return bot.Response{
@@ -192,12 +194,14 @@ type aliasBuilder struct {
 	ChatID int64  `json:"chat_id"`
 	Path   string `json:"path"`
 	Alias  string `json:"alias"`
+	Type   string `json:"type"`
 }
 
 func newAliasBuilder(chatID int64) aliasBuilder {
 	return aliasBuilder{
 		ID:     uuid.NewString(),
 		ChatID: chatID,
+		Type:   domain.TypeFile,
 	}
 }
 
@@ -231,13 +235,13 @@ func (a *AddAliasHandler) handlePathSet(ctx context.Context, u bot.Update, s bot
 			return bot.Response{}, err
 		}
 	}
-	if u.Text == prevPathCommand {
+	if u.Text == string(prevPathCommand) {
 		payload = payload.cdPrev()
-	}
-	if u.Text == currentDirCommand {
+	} else if u.Text == string(currentDirCommand) {
 		msgCfg := tgbotapi.NewEditMessageText(s.ChatID, s.LastBotMessageID, "Введите алиас для пути")
 		builder := newAliasBuilder(s.ChatID)
 		builder.Path = payload.CurPath
+		builder.Type = domain.TypeDir
 		bytes, err := json.Marshal(builder)
 		if err != nil {
 			return bot.Response{}, err
@@ -247,6 +251,11 @@ func (a *AddAliasHandler) handlePathSet(ctx context.Context, u bot.Update, s bot
 			NewChatState: &StateWaitAlias,
 			NewPayload:   string(bytes),
 		}, nil
+	} else if u.Text != NextPageCommand && u.Text != PrevPageCommand {
+		payload.CurPath, err = url.JoinPath(payload.CurPath, u.Text)
+		if err != nil {
+			return bot.Response{}, err
+		}
 	}
 
 	dir, err := client.Directory(
@@ -254,6 +263,7 @@ func (a *AddAliasHandler) handlePathSet(ctx context.Context, u bot.Update, s bot
 		vault.Repo,
 		payload.CurPath,
 		payload.PageNum,
+		domain.DefaultPageSize,
 	)
 	if err != nil && errors.Is(err, domain.ErrNotDirectory) {
 		msgCfg := tgbotapi.NewEditMessageText(s.ChatID, s.LastBotMessageID, "Введите алиас для пути")
@@ -283,9 +293,13 @@ func (a *AddAliasHandler) handlePathSet(ctx context.Context, u bot.Update, s bot
 	)
 
 	msgCfg.ReplyMarkup = a.pathButtons(dir, payload)
-
+	bytes, err := json.Marshal(payload)
+	if err != nil {
+		return bot.Response{}, err
+	}
 	return bot.Response{
-		Message: msgCfg,
+		Message:    msgCfg,
+		NewPayload: string(bytes),
 	}, nil
 }
 
@@ -295,7 +309,7 @@ func (a *AddAliasHandler) pathButtons(dirElems domain.Page[domain.DirElem], payl
 		buttons = append(buttons, []tgbotapi.InlineKeyboardButton{
 			tgbotapi.NewInlineKeyboardButtonData(
 				"..",
-				prevPathCommand,
+				string(prevPathCommand),
 			),
 		})
 	}
@@ -311,7 +325,7 @@ func (a *AddAliasHandler) pathButtons(dirElems domain.Page[domain.DirElem], payl
 	buttons = append(buttons, []tgbotapi.InlineKeyboardButton{
 		tgbotapi.NewInlineKeyboardButtonData(
 			"Выбрать текущую директорию как путь",
-			currentDirCommand,
+			string(currentDirCommand),
 		),
 	})
 	if payload.PageNum < dirElems.TotalPages-1 {

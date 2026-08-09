@@ -235,11 +235,9 @@ func (b *Bot) handle(ctx context.Context, u tgbotapi.Update) {
 	}
 
 	session.LastBotMessageID = msg.MessageID
-	newState := resp.NewChatState
-	if newState == nil || *newState == session.State {
-		return
+	if resp.NewChatState != nil {
+		session.State = *resp.NewChatState
 	}
-	session.State = *newState
 	session.Payload = resp.NewPayload
 	b.sessionService.UpdateSession(chat.ID, session)
 }
@@ -308,6 +306,9 @@ func (b *Bot) StartListening(ctx context.Context) {
 						return
 					}
 					chat := u.FromChat()
+					if chat == nil {
+						continue
+					}
 					unlock := locks.lock(chat.ID)
 					b.handle(ctx, u)
 					unlock()

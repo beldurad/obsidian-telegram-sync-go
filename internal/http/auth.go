@@ -5,6 +5,8 @@ import (
 	"net/http"
 )
 
+const CallbackEndpoint = "/callback"
+
 type AuthService interface {
 	CompleteAuth(ctx context.Context, code string, state string) error
 }
@@ -13,7 +15,13 @@ type AuthHandler struct {
 	service AuthService
 }
 
-func (a AuthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func NewAuthHandler(service AuthService) *AuthHandler {
+	return &AuthHandler{
+		service: service,
+	}
+}
+
+func (a *AuthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	code := r.URL.Query().Get("code")
