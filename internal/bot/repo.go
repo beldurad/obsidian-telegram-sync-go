@@ -3,6 +3,7 @@ package bot
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"slices"
 
 	"github.com/beldurad/obsidian-telegram-sync-go/foundation/bot"
@@ -27,7 +28,7 @@ var RepoSetCommands = []string{
 // ===== SET REPO =====
 
 type ClientGetter interface {
-	Client(ctx context.Context, chatID int64) (*domain.GithubClient, error)
+	Client(ctx context.Context, chatID int64) (domain.RemoteStorage, error)
 }
 
 type UserVaultService interface {
@@ -61,31 +62,30 @@ func (h *RepoSetHandler) Handle(ctx context.Context, u bot.Update) (bot.Response
 		return bot.Response{}, err
 	}
 
-	if state != bot.DefaultChatState &&
+	if state == RepoSetState &&
 		!slices.Contains(RepoSetCommands, u.Raw.CallbackData()) {
-
+		log.Println("repo chosen")
 		return h.handleChosenRepo(ctx, session, client, u.Raw.CallbackData(), user.Username)
 	}
 
 	var payload pagePayload
-	if state == bot.DefaultChatState {
-		payload = pagePayload{
-			PageNum: 0,
-		}
-	} else {
+	if session.State != bot.DefaultChatState {
 		raw := session.Payload
-		var prev pagePayload
-		err := json.Unmarshal([]byte(raw), &prev)
+		err := json.Unmarshal([]byte(raw), &payload)
 		if err != nil {
+			log.Printf("error while unmarshalling: %v", err)
 			return bot.Response{}, err
 		}
-		switch u.Text {
+		log.Printf("unmarshalled previous payload: %v", payload)
+		switch u.Raw.CallbackData() {
 		case NextPageCommand:
 			payload.PageNum++
 		case PrevPageCommand:
-			payload.PageNum--
+			payload.PageNum = max(0, payload.PageNum-1)
 		}
 	}
+
+	log.Printf("payload: %v", payload)
 	repoPage, err := client.UserRepos(user.Username, payload.PageNum, domain.DefaultPageSize)
 	if err != nil {
 		return bot.Response{}, err
@@ -96,12 +96,12 @@ func (h *RepoSetHandler) Handle(ctx context.Context, u bot.Update) (bot.Response
 			tgbotapi.NewInlineKeyboardButtonData(repo.Name, repo.Name),
 		}
 	}
-	if payload.PageNum < repoPage.TotalPages-1 {
+	if repoPage.HasNext() {
 		buttons = append(buttons, []tgbotapi.InlineKeyboardButton{
 			tgbotapi.NewInlineKeyboardButtonData("Next", NextPageCommand),
 		})
 	}
-	if payload.PageNum > 0 {
+	if repoPage.HasPrev() {
 		buttons = append(buttons, []tgbotapi.InlineKeyboardButton{
 			tgbotapi.NewInlineKeyboardButtonData("Prev", PrevPageCommand),
 		})
@@ -135,7 +135,7 @@ func (h *RepoSetHandler) Handle(ctx context.Context, u bot.Update) (bot.Response
 
 }
 
-func (h *RepoSetHandler) handleChosenRepo(ctx context.Context, session bot.ChatSession, client *domain.GithubClient, repo, owner string) (bot.Response, error) {
+func (h *RepoSetHandler) handleChosenRepo(ctx context.Context, session bot.ChatSession, client domain.RemoteStorage, repo, owner string) (bot.Response, error) {
 	chatID := session.ChatID
 	lastMessageID := session.LastBotMessageID
 	exists, err := client.RepoExists(owner, repo)

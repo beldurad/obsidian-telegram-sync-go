@@ -49,20 +49,16 @@ func (h *GetTemplateHandler) Handle(ctx context.Context, u bot.Update) (bot.Resp
 
 	var payload pagePayload
 
-	if chatSession.State == bot.DefaultChatState {
-		payload = pagePayload{
-			PageNum: 0,
-		}
-	} else {
+	if chatSession.State != bot.DefaultChatState {
 		raw := chatSession.Payload
-		var prev pagePayload
-		err := json.Unmarshal([]byte(raw), &prev)
+		err := json.Unmarshal([]byte(raw), &payload)
 		if err != nil {
 			return bot.Response{}, err
 		}
-		if u.Text == NextPageCommand {
+		switch u.Raw.CallbackData() {
+		case NextPageCommand:
 			payload.PageNum++
-		} else {
+		case PrevPageCommand:
 			payload.PageNum--
 		}
 	}
@@ -100,10 +96,10 @@ func (h *GetTemplateHandler) Handle(ctx context.Context, u bot.Update) (bot.Resp
 	}
 
 	buttons := tgbotapi.NewInlineKeyboardRow()
-	if payload.PageNum != templatesPage.TotalPages-1 {
+	if templatesPage.HasNext() {
 		buttons = append(buttons, tgbotapi.NewInlineKeyboardButtonData("Next", NextPageCommand))
 	}
-	if payload.PageNum != 0 {
+	if templatesPage.HasPrev() {
 		buttons = append(buttons, tgbotapi.NewInlineKeyboardButtonData("Prev", PrevPageCommand))
 	}
 

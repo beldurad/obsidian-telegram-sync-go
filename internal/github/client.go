@@ -1,6 +1,5 @@
-package domain
+package github
 
-// ======== GITHUB AUTH ==========
 import (
 	"bytes"
 	"context"
@@ -13,8 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
-	"golang.org/x/oauth2"
+	"github.com/beldurad/obsidian-telegram-sync-go/internal/domain"
 )
 
 type GithubUser struct {
@@ -25,89 +23,6 @@ type GithubRepo struct {
 	Name string `json:"name"`
 }
 
-type OAuthContext struct {
-	ChatID   int64
-	State    string
-	Verifier string
-}
-
-func NewOAuthContext(chatID int64) *OAuthContext {
-
-	return &OAuthContext{
-		ChatID:   chatID,
-		State:    uuid.NewString(),
-		Verifier: oauth2.GenerateVerifier(),
-	}
-}
-
-type OAuthContextStorage interface {
-	Save(context.Context, *OAuthContext) error
-	ContextByState(ctx context.Context, state string) (*OAuthContext, error)
-}
-
-type OAuthTokenStorage interface {
-	Save(ctx context.Context, chatID int64, token *oauth2.Token) error
-	Token(ctx context.Context, chatID int64) (*oauth2.Token, error)
-}
-
-type OAuthService struct {
-	conf           *oauth2.Config
-	contextStorage OAuthContextStorage
-	tokenStorage   OAuthTokenStorage
-}
-
-func NewOAuthService(oauthConfig *oauth2.Config, contextStorage OAuthContextStorage, tokenStorage OAuthTokenStorage) *OAuthService {
-	return &OAuthService{
-		conf:           oauthConfig,
-		contextStorage: contextStorage,
-		tokenStorage:   tokenStorage,
-	}
-}
-
-func (s *OAuthService) GenerateAuthURL(ctx context.Context, chatID int64) (string, error) {
-	oauthCtx := NewOAuthContext(chatID)
-
-	err := s.contextStorage.Save(ctx, oauthCtx)
-	if err != nil {
-		return "", err
-	}
-
-	return s.conf.AuthCodeURL(
-			oauthCtx.State,
-			oauth2.AccessTypeOffline,
-			oauth2.S256ChallengeOption(oauthCtx.Verifier)),
-		nil
-}
-
-func (s *OAuthService) CompleteAuth(ctx context.Context, code string, state string) error {
-	oauthCtx, err := s.contextStorage.ContextByState(ctx, state)
-	if err != nil {
-		return err
-	}
-
-	token, err := s.conf.Exchange(ctx, code, oauth2.VerifierOption(oauthCtx.Verifier))
-	if err != nil {
-		return err
-	}
-
-	if err := s.tokenStorage.Save(ctx, oauthCtx.ChatID, token); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (s *OAuthService) Client(ctx context.Context, chatID int64) (*GithubClient, error) {
-	token, err := s.tokenStorage.Token(ctx, chatID)
-	if err != nil {
-		return nil, err
-	}
-
-	return &GithubClient{
-		client: s.conf.Client(ctx, token),
-	}, nil
-}
-
-// ======== CLIENT =========
 const baseURL = "https://api.github.com/"
 
 func base64Convert(raw string) string {
@@ -157,25 +72,25 @@ func update(ctx context.Context, client *http.Client, r CreateRequest) (*http.Re
 	return client.Do(req)
 }
 
-func (c *GithubClient) CreateFile(ctx context.Context, r CreateRequest) error {
+func (c *GithubClient) createFile(ctx context.Context, r CreateRequest) error {
 	r.Sha = ""
 	resp, err := update(ctx, c.client, r)
 	if err != nil {
-		return fmt.Errorf("%w: %w", ErrReqNotSend, err)
+		return fmt.Errorf("%w: %w", domain.ErrReqNotSend, err)
 	}
 	if resp.StatusCode != http.StatusCreated {
-		return fmt.Errorf("%w: %v", ErrNotSuccessfulResp, resp.StatusCode)
+		return fmt.Errorf("%w: %v", domain.ErrNotSuccessfulResp, resp.StatusCode)
 	}
 	return nil
 }
 
-func (c *GithubClient) UpdateFile(ctx context.Context, r CreateRequest) error {
+func (c *GithubClient) updateFile(ctx context.Context, r CreateRequest) error {
 	resp, err := update(ctx, c.client, r)
 	if err != nil {
-		return fmt.Errorf("%w: %w", ErrReqNotSend, err)
+		return fmt.Errorf("%w: %w", domain.ErrReqNotSend, err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("%w: %v", ErrNotSuccessfulResp, resp.StatusCode)
+		return fmt.Errorf("%w: %v", domain.ErrNotSuccessfulResp, resp.StatusCode)
 	}
 	return nil
 }
@@ -189,69 +104,70 @@ type GetDirRequest struct {
 	Limit  int
 }
 
-type DirElem struct {
-	Type    string `json:"type"`
-	Name    string `json:"name"`
-	Content string `json:"content"`
-	Sha     string `json:"sha"`
-}
-
 const (
 	TypeFile = "file"
 	TypeDir  = "dir"
 )
 
-func (c *GithubClient) UserInfo() (GithubUser, error) {
+func (c *GithubClient) UserInfo() (domain.RemoteUser, error) {
 	fullURL, err := url.JoinPath(baseURL, "user")
 	if err != nil {
-		return GithubUser{}, err
+		return domain.RemoteUser{}, err
 	}
 	resp, err := c.client.Get(fullURL)
 	if err != nil {
-		return GithubUser{}, err
+		return domain.RemoteUser{}, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return GithubUser{}, ErrNotSuccessfulResp
+		return domain.RemoteUser{}, domain.ErrNotSuccessfulResp
 	}
 	decoder := json.NewDecoder(resp.Body)
 	var user GithubUser
 
 	if err := decoder.Decode(&user); err != nil {
-		return GithubUser{}, err
+		return domain.RemoteUser{}, err
 	}
-	return user, nil
+	return domain.RemoteUser{
+		Username: user.Username,
+	}, nil
 }
-func (c *GithubClient) UserRepos(username string, pageNum int, pageSize int) (Page[GithubRepo], error) {
+func (c *GithubClient) UserRepos(username string, pageNum int, pageSize int) (domain.Page[domain.RemoteRepo], error) {
 	fullURL, err := url.JoinPath(baseURL, "user", "repos")
 	if err != nil {
-		return Page[GithubRepo]{}, err
+		return domain.Page[domain.RemoteRepo]{}, err
 	}
 	resp, err := c.client.Get(fullURL)
 	if err != nil {
-		return Page[GithubRepo]{}, err
+		return domain.Page[domain.RemoteRepo]{}, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return Page[GithubRepo]{}, ErrNotSuccessfulResp
+		return domain.Page[domain.RemoteRepo]{}, domain.ErrNotSuccessfulResp
 	}
 	decoder := json.NewDecoder(resp.Body)
 	var repos []GithubRepo
 	if err := decoder.Decode(&repos); err != nil {
-		return Page[GithubRepo]{}, err
+		return domain.Page[domain.RemoteRepo]{}, err
 	}
 	if len(repos) == 0 {
-		return Page[GithubRepo]{}, nil
+		return domain.Page[domain.RemoteRepo]{}, nil
 	}
 	leftBound := min(pageNum*pageSize, len(repos))
 	rightBound := min(pageNum*pageSize+pageSize, len(repos))
 	totalPages := int(math.Ceil(float64(len(repos)) / float64(pageSize)))
 	if leftBound >= rightBound {
-		return Page[GithubRepo]{TotalPages: totalPages}, nil
+		return domain.Page[domain.RemoteRepo]{TotalPages: totalPages}, nil
+	}
+	values := make([]domain.RemoteRepo, rightBound-leftBound)
+	for i := leftBound; i < rightBound; i++ {
+		values[i-leftBound] = domain.RemoteRepo{
+			Name: repos[i].Name,
+		}
 	}
 
-	return Page[GithubRepo]{
-		Values:     repos[leftBound:rightBound],
+	return domain.Page[domain.RemoteRepo]{
+		Values:     values,
 		TotalPages: totalPages,
 	}, nil
 }
@@ -269,71 +185,72 @@ func (c *GithubClient) RepoExists(owner, repo string) (bool, error) {
 	return resp.StatusCode == http.StatusOK, nil
 }
 
-func (c *GithubClient) Directory(owner, repo, path string, pageNum int, pageSize int) (Page[DirElem], error) {
+func (c *GithubClient) Directory(owner, repo, path string, pageNum int, pageSize int) (domain.Page[domain.DirElem], error) {
+
 	fullURL, err := url.JoinPath(baseURL, "repos", owner, repo, "contents", path)
 	if err != nil {
-		return Page[DirElem]{}, err
+		return domain.Page[domain.DirElem]{}, err
 	}
 
 	resp, err := c.client.Get(fullURL)
 	if err != nil {
-		return Page[DirElem]{}, err
+		return domain.Page[domain.DirElem]{}, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return Page[DirElem]{}, ErrNotSuccessfulResp
+		return domain.Page[domain.DirElem]{}, domain.ErrNotSuccessfulResp
 	}
-	var dir []DirElem
+	var dir []domain.DirElem
 
 	decoder := json.NewDecoder(resp.Body)
 
 	if err := decoder.Decode(&dir); err != nil {
-		return Page[DirElem]{}, err
+		return domain.Page[domain.DirElem]{}, err
 	}
 	leftBound := min(pageNum*pageSize, len(dir)-1)
 	rightBound := min(pageNum*pageSize+pageSize, len(dir))
 	totalPages := int(math.Ceil(float64(len(dir)) / float64(pageSize)))
 
-	return Page[DirElem]{
+	return domain.Page[domain.DirElem]{
 		TotalPages: totalPages,
 		Values:     dir[leftBound:rightBound],
 	}, nil
 
 }
 
-func (c *GithubClient) File(owner, repo, path string) (DirElem, error) {
+func (c *GithubClient) File(owner, repo, path string) (domain.DirElem, error) {
 	fullURL, err := url.JoinPath(baseURL, "repos", owner, repo, "contents", path)
 	if err != nil {
-		return DirElem{}, err
+		return domain.DirElem{}, err
 	}
 
 	resp, err := c.client.Get(fullURL)
 	if err != nil {
-		return DirElem{}, err
+		return domain.DirElem{}, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return DirElem{}, ErrNotSuccessfulResp
+		return domain.DirElem{}, domain.ErrNotSuccessfulResp
 	}
-	var file DirElem
+	var file domain.DirElem
 
 	decoder := json.NewDecoder(resp.Body)
 
 	if err := decoder.Decode(&file); err != nil {
-		return DirElem{}, err
+		return domain.DirElem{}, err
 	}
 
 	return file, nil
 }
 
-func (c *GithubClient) SaveNote(ctx context.Context, owner, repo string, note Note) error {
+func (c *GithubClient) SaveNote(ctx context.Context, owner, repo string, note domain.Note) error {
 	file, err := c.File(owner, repo, note.Path)
 	if err == nil && file.Type == TypeFile {
 		raw, err := base64.StdEncoding.DecodeString(file.Content)
 		if err != nil {
 			return err
 		}
-		return c.UpdateFile(ctx, CreateRequest{
+		return c.updateFile(ctx, CreateRequest{
 			Owner:   owner,
 			Repo:    repo,
 			Path:    note.Path,
@@ -343,7 +260,7 @@ func (c *GithubClient) SaveNote(ctx context.Context, owner, repo string, note No
 		})
 	}
 
-	return c.CreateFile(ctx, CreateRequest{
+	return c.createFile(ctx, CreateRequest{
 		Owner:   owner,
 		Repo:    repo,
 		Path:    note.Path,

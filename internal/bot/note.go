@@ -165,7 +165,7 @@ func (a *AddNoteHandler) aliasButtons(ctx context.Context, s bot.ChatSession, pa
 			),
 		})
 	}
-	if pageNum < aliases.TotalPages-1 {
+	if aliases.HasNext() {
 		buttons = append(buttons, []tgbotapi.InlineKeyboardButton{
 			tgbotapi.NewInlineKeyboardButtonData(
 				"Next",
@@ -173,7 +173,7 @@ func (a *AddNoteHandler) aliasButtons(ctx context.Context, s bot.ChatSession, pa
 			),
 		})
 	}
-	if pageNum > 0 {
+	if aliases.HasPrev() {
 		buttons = append(buttons, []tgbotapi.InlineKeyboardButton{
 			tgbotapi.NewInlineKeyboardButtonData(
 				"Prev",
@@ -250,7 +250,7 @@ func (a *AddNoteHandler) templateButtons(ctx context.Context, s bot.ChatSession,
 			),
 		})
 	}
-	if pageNum < templates.TotalPages-1 {
+	if templates.HasNext() {
 		buttons = append(buttons, []tgbotapi.InlineKeyboardButton{
 			tgbotapi.NewInlineKeyboardButtonData(
 				"Next",
@@ -258,7 +258,7 @@ func (a *AddNoteHandler) templateButtons(ctx context.Context, s bot.ChatSession,
 			),
 		})
 	}
-	if pageNum > 0 {
+	if templates.HasPrev() {
 		buttons = append(buttons, []tgbotapi.InlineKeyboardButton{
 			tgbotapi.NewInlineKeyboardButtonData(
 				"Prev",

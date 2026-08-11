@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
-	"strings"
 
 	"github.com/beldurad/obsidian-telegram-sync-go/foundation/bot"
 	"github.com/beldurad/obsidian-telegram-sync-go/internal/domain"
@@ -61,9 +60,10 @@ func (h *GetAliasesHandler) Handle(ctx context.Context, u bot.Update) (bot.Respo
 		if err != nil {
 			return bot.Response{}, err
 		}
-		if u.Text == NextPageCommand {
+		switch u.Text {
+		case NextPageCommand:
 			payload.PageNum++
-		} else {
+		case PrevPageCommand:
 			payload.PageNum = max(0, payload.PageNum-1)
 		}
 	}
@@ -84,7 +84,7 @@ func (h *GetAliasesHandler) Handle(ctx context.Context, u bot.Update) (bot.Respo
 			textBuilder,
 			[]rune(
 				fmt.Sprintf(`
-				%s -> %s\n
+				%s -> %s
 				`,
 					alias.Path,
 					alias.Alias,
@@ -102,10 +102,10 @@ func (h *GetAliasesHandler) Handle(ctx context.Context, u bot.Update) (bot.Respo
 	}
 
 	buttons := tgbotapi.NewInlineKeyboardRow()
-	if payload.PageNum != aliasesPage.TotalPages-1 {
+	if aliasesPage.HasNext() {
 		buttons = append(buttons, tgbotapi.NewInlineKeyboardButtonData("Next", NextPageCommand))
 	}
-	if payload.PageNum != 0 {
+	if aliasesPage.HasPrev() {
 		buttons = append(buttons, tgbotapi.NewInlineKeyboardButtonData("Prev", PrevPageCommand))
 	}
 
@@ -144,13 +144,14 @@ type pathChoosingPayload struct {
 	PageNum int    `json:"page"`
 }
 
-func (p pathChoosingPayload) cdPrev() pathChoosingPayload {
-	last := strings.LastIndex(p.CurPath, "/")
-	if last == -1 {
-		return p
+func newPathChoosingPayload() pathChoosingPayload {
+	return pathChoosingPayload{
+		CurPath: "/",
 	}
-	p.CurPath = p.CurPath[:last]
-	return p
+}
+
+func (p pathChoosingPayload) isRootPath() bool {
+	return p.CurPath == "" || p.CurPath == "/"
 }
 
 type UserVaultGetter interface {
@@ -228,16 +229,14 @@ func (a *AddAliasHandler) handlePathSet(ctx context.Context, u bot.Update, s bot
 	if err != nil {
 		return bot.Response{}, err
 	}
-	payload := pathChoosingPayload{}
+	payload := newPathChoosingPayload()
 	if s.State != bot.DefaultChatState {
 		raw := s.Payload
 		if err := json.Unmarshal([]byte(raw), &payload); err != nil {
 			return bot.Response{}, err
 		}
 	}
-	if u.Text == string(prevPathCommand) {
-		payload = payload.cdPrev()
-	} else if u.Text == string(currentDirCommand) {
+	if u.Text == string(currentDirCommand) {
 		msgCfg := tgbotapi.NewEditMessageText(s.ChatID, s.LastBotMessageID, "Введите алиас для пути")
 		builder := newAliasBuilder(s.ChatID)
 		builder.Path = payload.CurPath
@@ -253,6 +252,7 @@ func (a *AddAliasHandler) handlePathSet(ctx context.Context, u bot.Update, s bot
 		}, nil
 	} else if u.Text != NextPageCommand && u.Text != PrevPageCommand {
 		payload.CurPath, err = url.JoinPath(payload.CurPath, u.Text)
+		payload.PageNum = 0
 		if err != nil {
 			return bot.Response{}, err
 		}
@@ -292,20 +292,21 @@ func (a *AddAliasHandler) handlePathSet(ctx context.Context, u bot.Update, s bot
 		`,
 	)
 
-	msgCfg.ReplyMarkup = a.pathButtons(dir, payload)
+	msgCfg.ReplyMarkup = pathButtons(dir, payload)
 	bytes, err := json.Marshal(payload)
 	if err != nil {
 		return bot.Response{}, err
 	}
 	return bot.Response{
-		Message:    msgCfg,
-		NewPayload: string(bytes),
+		Message:      msgCfg,
+		NewChatState: &StateWaitPath,
+		NewPayload:   string(bytes),
 	}, nil
 }
 
-func (a *AddAliasHandler) pathButtons(dirElems domain.Page[domain.DirElem], payload pathChoosingPayload) tgbotapi.InlineKeyboardMarkup {
+func pathButtons(dirElems domain.Page[domain.DirElem], payload pathChoosingPayload) tgbotapi.InlineKeyboardMarkup {
 	buttons := make([][]tgbotapi.InlineKeyboardButton, 0)
-	if payload.CurPath != "" {
+	if !payload.isRootPath() {
 		buttons = append(buttons, []tgbotapi.InlineKeyboardButton{
 			tgbotapi.NewInlineKeyboardButtonData(
 				"..",
@@ -318,7 +319,7 @@ func (a *AddAliasHandler) pathButtons(dirElems domain.Page[domain.DirElem], payl
 		buttons = append(buttons, []tgbotapi.InlineKeyboardButton{
 			tgbotapi.NewInlineKeyboardButtonData(
 				fmt.Sprintf("%s: %s", elem.Type, elem.Name),
-				elem.Name,
+				fmt.Sprintf("/%s", elem.Name),
 			),
 		})
 	}
@@ -328,7 +329,7 @@ func (a *AddAliasHandler) pathButtons(dirElems domain.Page[domain.DirElem], payl
 			string(currentDirCommand),
 		),
 	})
-	if payload.PageNum < dirElems.TotalPages-1 {
+	if dirElems.HasNext() {
 		buttons = append(buttons,
 			[]tgbotapi.InlineKeyboardButton{
 				tgbotapi.NewInlineKeyboardButtonData(
@@ -338,7 +339,7 @@ func (a *AddAliasHandler) pathButtons(dirElems domain.Page[domain.DirElem], payl
 			},
 		)
 	}
-	if payload.PageNum > 0 {
+	if dirElems.HasPrev() {
 		buttons = append(buttons,
 			[]tgbotapi.InlineKeyboardButton{
 				tgbotapi.NewInlineKeyboardButtonData(

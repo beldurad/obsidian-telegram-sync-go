@@ -21,7 +21,7 @@ var CommandStart = bot.Command("/start")
 
 type AuthService interface {
 	GenerateAuthURL(ctx context.Context, chatID int64) (string, error)
-	Client(ctx context.Context, chatID int64) (*domain.GithubClient, error)
+	Client(ctx context.Context, chatID int64) (domain.RemoteStorage, error)
 }
 
 type AuthHandler struct {

@@ -63,6 +63,7 @@ func (s *TemplateStorage) Save(ctx context.Context, t domain.Template) error {
 
 func (s *TemplateStorage) TemplatesPage(ctx context.Context, chatID int64, pageNum, pageSize int) (domain.Page[domain.Template], error) {
 	page := domain.Page[domain.Template]{}
+	page.CurPage = pageNum
 
 	if pageNum, ok := s.pageCountCache.Get(ctx, chatID, pageSize); ok {
 		page.TotalPages = pageNum
