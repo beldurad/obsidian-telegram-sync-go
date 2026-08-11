@@ -329,19 +329,15 @@ type errorHandlerMock struct {
 	response bot.Response
 }
 
-func (h *errorHandlerMock) Match(err error) bool {
-	h.matched = true
-	return true
-}
-
-func (h *errorHandlerMock) Handle(
-	chatID int64,
-	err error,
-) bot.Response {
-
+func (h *errorHandlerMock) Handle(context.Context, bot.Update, error) bot.Response {
 	h.called = true
 
 	return h.response
+}
+
+func (h *errorHandlerMock) Match(err error) bool {
+	h.matched = true
+	return true
 }
 
 type failingHandler struct {
@@ -466,15 +462,12 @@ func TestBot_ErrorHandlerCalled(t *testing.T) {
 
 type neverMatchErrorHandler struct{}
 
-func (h *neverMatchErrorHandler) Match(err error) bool {
-	return false
+func (h neverMatchErrorHandler) Handle(context.Context, bot.Update, error) bot.Response {
+	panic("should not be called")
 }
 
-func (h *neverMatchErrorHandler) Handle(
-	chatID int64,
-	err error,
-) bot.Response {
-	panic("should not be called")
+func (h neverMatchErrorHandler) Match(err error) bool {
+	return false
 }
 
 func TestBot_DefaultErrorHandler(t *testing.T) {

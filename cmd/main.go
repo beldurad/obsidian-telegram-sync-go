@@ -13,7 +13,7 @@ import (
 	"github.com/beldurad/obsidian-telegram-sync-go/internal/bot"
 	"github.com/beldurad/obsidian-telegram-sync-go/internal/cache"
 	"github.com/beldurad/obsidian-telegram-sync-go/internal/config"
-	"github.com/beldurad/obsidian-telegram-sync-go/internal/domain"
+	appgithub "github.com/beldurad/obsidian-telegram-sync-go/internal/github"
 	"github.com/beldurad/obsidian-telegram-sync-go/internal/http"
 	"github.com/beldurad/obsidian-telegram-sync-go/internal/postgres"
 	"golang.org/x/oauth2"
@@ -44,7 +44,7 @@ func main() {
 		Scopes:       strings.Split(cfg.Scopes, " "),
 	}
 
-	oauthService := domain.NewOAuthService(&oauthCfg, oauthContextStorage, oauthTokenStorage)
+	oauthService := appgithub.NewOAuthService(&oauthCfg, oauthContextStorage, oauthTokenStorage)
 
 	aliasGetHandler := bot.NewGetAliasesHandler(aliasStorage)
 	aliasAddHandler := bot.NewAddAliasHandler(userVaultStorage, oauthService, aliasStorage)

@@ -8,9 +8,9 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
-const goroutinesPoolSize = 20
+const defaultWorkerPoolSize = 20
 
-const ChatSessionKey = "session"
+const ChatSessionKey = "chat_session_key"
 
 var ErrInternalServer = fmt.Errorf("Internal Server Error")
 var ErrUnknown = fmt.Errorf("Unknown error while handling message")
@@ -102,7 +102,7 @@ func merge(h Handler, middlewares ...Middleware) Handler {
 
 type ErrorHandler interface {
 	Match(err error) bool
-	Handle(chatID int64, err error) Response
+	Handle(context.Context, Update, error) Response
 }
 
 func defaultErrorHandle(chatID int64) Response {
@@ -111,13 +111,13 @@ func defaultErrorHandle(chatID int64) Response {
 	}
 }
 
-func (b *Bot) errHandle(chatID int64, err error) Response {
+func (b *Bot) errHandle(ctx context.Context, u Update, err error) Response {
 	for _, h := range b.errorHandlers {
 		if h.Match(err) {
-			return h.Handle(chatID, err)
+			return h.Handle(ctx, u, err)
 		}
 	}
-	return defaultErrorHandle(chatID)
+	return defaultErrorHandle(u.ChatID)
 }
 
 type TelegramBotClient interface {
@@ -132,7 +132,8 @@ type TelegramBotClient interface {
 // commands or the chat state, which
 // is set by the bot's client.
 type Bot struct {
-	tgBot TelegramBotClient
+	workerPoolSize int
+	tgBot          TelegramBotClient
 
 	sessionService ChatSessionService
 
@@ -144,8 +145,9 @@ type Bot struct {
 	byBoth    map[commonKey]Handler
 }
 
-func New(sessionService ChatSessionService, botClient TelegramBotClient) *Bot {
-	return &Bot{
+func New(sessionService ChatSessionService, botClient TelegramBotClient, opts ...option) *Bot {
+	bot := &Bot{
+		workerPoolSize: defaultWorkerPoolSize,
 		tgBot:          botClient,
 		sessionService: sessionService,
 		errorHandlers:  make([]ErrorHandler, 0),
@@ -153,6 +155,10 @@ func New(sessionService ChatSessionService, botClient TelegramBotClient) *Bot {
 		byCommand:      make(map[Command]Handler),
 		byBoth:         make(map[commonKey]Handler),
 	}
+	for _, opt := range opts {
+		opt(bot)
+	}
+	return bot
 }
 
 func (b *Bot) AddHandlerForCommand(c Command, h Handler, m ...Middleware) {
@@ -224,7 +230,7 @@ func (b *Bot) handle(ctx context.Context, u tgbotapi.Update) {
 	ctx = context.WithValue(ctx, ChatSessionKey, session)
 	resp, err = handler.Handle(ctx, update)
 	if err != nil {
-		resp = b.errHandle(chat.ID, err)
+		resp = b.errHandle(ctx, update, err)
 	}
 
 	msg, err := b.tgBot.Send(resp.Message)
@@ -289,19 +295,20 @@ func (b *Bot) StartListening(ctx context.Context) {
 		locks: make(map[int64]*chatLock),
 	}
 
+	workerChans := make(map[int]chan tgbotapi.Update)
+	for i := range b.workerPoolSize {
+		workerChans[i] = make(chan tgbotapi.Update)
+		defer close(workerChans[i])
+	}
 	updates := b.tgBot.GetUpdatesChan()
 	done := ctx.Done()
-
-	jobs := make(chan tgbotapi.Update, 100)
-	defer close(jobs)
-
-	for range goroutinesPoolSize {
+	for i := range b.workerPoolSize {
 		go func() {
 			for {
 				select {
 				case <-done:
 					return
-				case u, ok := <-jobs:
+				case u, ok := <-workerChans[i]:
 					if !ok {
 						return
 					}
@@ -320,11 +327,24 @@ func (b *Bot) StartListening(ctx context.Context) {
 		select {
 		case <-done:
 			return
-		case u, ok := <-updates:
-			if !ok {
+		case u := <-updates:
+			chat := u.FromChat()
+			if chat == nil {
+				continue
+			}
+			select {
+			case workerChans[int(chat.ID)%b.workerPoolSize] <- u:
+			case <-done:
 				return
 			}
-			jobs <- u
 		}
 	}
+}
+
+type option func(*Bot)
+
+func WithWorkers(n int) option {
+	return option(func(b *Bot) {
+		b.workerPoolSize = n
+	})
 }
