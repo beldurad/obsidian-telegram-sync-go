@@ -17,6 +17,7 @@ func New(dbCfg config.DatabaseConfig) *sql.DB {
 		User:     dbCfg.User,
 		Password: dbCfg.Password,
 		Database: dbCfg.DatabaseName,
+		SSLMode:  pq.SSLModeDisable,
 	}
 
 	c, err := pq.NewConnectorConfig(cfg)
@@ -24,7 +25,7 @@ func New(dbCfg config.DatabaseConfig) *sql.DB {
 
 	err = db.Ping()
 	if err != nil {
-		log.Fatal("Error while ping db")
+		log.Fatalf("Error while ping db: %v", err)
 	}
 
 	sqlBytes, err := os.ReadFile(dbCfg.InitSqlFilepath)

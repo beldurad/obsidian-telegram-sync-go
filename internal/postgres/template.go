@@ -3,6 +3,8 @@ package postgres
 import (
 	"context"
 	"database/sql"
+	"fmt"
+	"log"
 	"math"
 
 	"github.com/beldurad/obsidian-telegram-sync-go/internal/domain"
@@ -12,6 +14,7 @@ import (
 type TemplatePageCountCache interface {
 	Put(ctx context.Context, chatID int64, pageSize, count int) error
 	Get(ctx context.Context, chatID int64, pageSize int) (count int, ok bool)
+	Delete(ctx context.Context, chatID int64, pageSize int) error
 }
 
 type TemplateStorage struct {
@@ -26,7 +29,7 @@ func NewTemplateStorage(db *sql.DB, pageNumCache TemplatePageCountCache) *Templa
 	}
 }
 
-func (s *TemplateStorage) Save(ctx context.Context, t domain.Template) error {
+func (s *TemplateStorage) Save(ctx context.Context, t domain.Template) (err error) {
 	const query = `
 	INSERT INTO template (id, chat_id, name, value)
 	VALUES
@@ -34,8 +37,18 @@ func (s *TemplateStorage) Save(ctx context.Context, t domain.Template) error {
 	`
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return err
+		return fmt.Errorf("%w:%w", domain.ErrDb, err)
 	}
+	defer func() {
+		if err != nil {
+			tx.Rollback()
+			return
+		}
+		err = tx.Commit()
+		if err != nil {
+			err = fmt.Errorf("%w:%w", domain.ErrDb, err)
+		}
+	}()
 	_, err = tx.ExecContext(
 		ctx,
 		query,
@@ -45,23 +58,23 @@ func (s *TemplateStorage) Save(ctx context.Context, t domain.Template) error {
 		t.Value,
 	)
 	if err != nil {
-		return err
-	}
-	if err := tx.Commit(); err != nil {
-		return err
+		return fmt.Errorf("%w:%w", domain.ErrDb, err)
 	}
 
-	oldCount, ok := s.pageCountCache.Get(ctx, t.ChatID, domain.DefaultPageSize)
-	if !ok {
-		return nil
-	}
-	if err := s.pageCountCache.Put(ctx, t.ChatID, domain.DefaultPageSize, oldCount+1); err != nil {
-		return err
+	err = s.pageCountCache.Delete(ctx, t.ChatID, domain.DefaultPageSize)
+	if err != nil {
+		log.Printf("Error while deleting template cache: %v", err)
 	}
 	return nil
 }
 
 func (s *TemplateStorage) TemplatesPage(ctx context.Context, chatID int64, pageNum, pageSize int) (domain.Page[domain.Template], error) {
+	if pageNum < 0 || pageSize < 0 {
+		return domain.Page[domain.Template]{}, domain.ErrBadArgument
+	}
+	if pageSize == 0 {
+		return domain.Page[domain.Template]{}, nil
+	}
 	page := domain.Page[domain.Template]{}
 	page.CurPage = pageNum
 
@@ -79,14 +92,17 @@ func (s *TemplateStorage) TemplatesPage(ctx context.Context, chatID int64, pageN
 			countQuery, chatID,
 		).Scan(&count)
 		if err != nil {
-			return page, err
+			return page, fmt.Errorf("%w:%w", domain.ErrDb, err)
 		}
 		page.TotalPages = int(
 			math.Ceil(
 				float64(count) / float64(pageSize),
 			),
 		)
-		s.pageCountCache.Put(ctx, chatID, pageSize, page.TotalPages)
+		err = s.pageCountCache.Put(ctx, chatID, pageSize, page.TotalPages)
+		if err != nil {
+			log.Printf("error while saving template cache: %v", err)
+		}
 	}
 	offset := pageNum * pageSize
 	limit := pageSize
@@ -99,7 +115,7 @@ func (s *TemplateStorage) TemplatesPage(ctx context.Context, chatID int64, pageN
 	`
 	rows, err := s.db.QueryContext(ctx, query, chatID, offset, limit)
 	if err != nil {
-		return domain.Page[domain.Template]{}, err
+		return domain.Page[domain.Template]{}, fmt.Errorf("%w:%w", domain.ErrDb, err)
 	}
 	templates := make([]domain.Template, pageSize)
 	cur := 0
@@ -112,8 +128,7 @@ func (s *TemplateStorage) TemplatesPage(ctx context.Context, chatID int64, pageN
 			&templates[cur].Value,
 		)
 		if err != nil {
-			page.TotalPages = 0
-			return page, err
+			return domain.Page[domain.Template]{}, fmt.Errorf("%w:%w", domain.ErrDb, err)
 		}
 		cur++
 	}
@@ -122,6 +137,11 @@ func (s *TemplateStorage) TemplatesPage(ctx context.Context, chatID int64, pageN
 }
 
 func (s *TemplateStorage) Template(ctx context.Context, id string, chatID int64) (domain.Template, error) {
+	parsedID, err := uuid.Parse(id)
+	if err != nil {
+		return domain.Template{}, fmt.Errorf("%w: %w", domain.ErrBadArgument, err)
+	}
+
 	const query = `
 	SELECT chat_id, name, value, created_at
 	FROM template
@@ -131,11 +151,7 @@ func (s *TemplateStorage) Template(ctx context.Context, id string, chatID int64)
 	var template domain.Template
 
 	if err := s.db.QueryRowContext(ctx, query, id, chatID).Scan(&template.ChatID, &template.Name, &template.Value, &template.CreatedAt); err != nil {
-		return domain.Template{}, err
-	}
-	parsedID, err := uuid.Parse(id)
-	if err != nil {
-		return domain.Template{}, err
+		return domain.Template{}, fmt.Errorf("%w:%w", domain.ErrDb, err)
 	}
 	template.ID = parsedID
 	return template, nil

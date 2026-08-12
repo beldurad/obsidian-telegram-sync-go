@@ -76,10 +76,10 @@ func (c *GithubClient) createFile(ctx context.Context, r CreateRequest) error {
 	r.Sha = ""
 	resp, err := update(ctx, c.client, r)
 	if err != nil {
-		return fmt.Errorf("%w: %w", domain.ErrReqNotSend, err)
+		return fmt.Errorf("%w: %w", domain.ErrClient, err)
 	}
 	if resp.StatusCode != http.StatusCreated {
-		return fmt.Errorf("%w: %v", domain.ErrNotSuccessfulResp, resp.StatusCode)
+		return fmt.Errorf("%w: %v", domain.ErrClient, resp.StatusCode)
 	}
 	return nil
 }
@@ -87,10 +87,10 @@ func (c *GithubClient) createFile(ctx context.Context, r CreateRequest) error {
 func (c *GithubClient) updateFile(ctx context.Context, r CreateRequest) error {
 	resp, err := update(ctx, c.client, r)
 	if err != nil {
-		return fmt.Errorf("%w: %w", domain.ErrReqNotSend, err)
+		return fmt.Errorf("%w: %w", domain.ErrClient, err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("%w: %v", domain.ErrNotSuccessfulResp, resp.StatusCode)
+		return fmt.Errorf("%w: %v", domain.ErrClient, resp.StatusCode)
 	}
 	return nil
 }
@@ -120,7 +120,7 @@ func (c *GithubClient) UserInfo() (domain.RemoteUser, error) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return domain.RemoteUser{}, domain.ErrNotSuccessfulResp
+		return domain.RemoteUser{}, domain.ErrClient
 	}
 	decoder := json.NewDecoder(resp.Body)
 	var user GithubUser
@@ -143,7 +143,7 @@ func (c *GithubClient) UserRepos(username string, pageNum int, pageSize int) (do
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return domain.Page[domain.RemoteRepo]{}, domain.ErrNotSuccessfulResp
+		return domain.Page[domain.RemoteRepo]{}, domain.ErrClient
 	}
 	decoder := json.NewDecoder(resp.Body)
 	var repos []GithubRepo
@@ -198,7 +198,7 @@ func (c *GithubClient) Directory(owner, repo, path string, pageNum int, pageSize
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return domain.Page[domain.DirElem]{}, domain.ErrNotSuccessfulResp
+		return domain.Page[domain.DirElem]{}, domain.ErrClient
 	}
 	var dir []domain.DirElem
 
@@ -230,7 +230,7 @@ func (c *GithubClient) File(owner, repo, path string) (domain.DirElem, error) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return domain.DirElem{}, domain.ErrNotSuccessfulResp
+		return domain.DirElem{}, domain.ErrClient
 	}
 	var file domain.DirElem
 

@@ -14,6 +14,8 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    networks:
+      - backend
     secrets:
       - db_pass
 
@@ -30,11 +32,16 @@ services:
       - ./sql:/app/sql
     ports:
       - "8090:8090"
+    networks:
+      - backend
     secrets:
       - db_pass
       - tg_token
       - github_id
       - github_secret
+
+networks:
+  backend:
 
 secrets:
   db_pass:

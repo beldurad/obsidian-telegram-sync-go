@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 
 	"github.com/beldurad/obsidian-telegram-sync-go/internal/domain"
 )
@@ -20,22 +21,20 @@ func NewUserVaultStorage(db *sql.DB) *UserVaultStorage {
 
 func (u *UserVaultStorage) ExistsByChatID(ctx context.Context, chatID int64) (bool, error) {
 	const query = `
-	SELECT id
+	SELECT chat_id
 	FROM vault
 	WHERE chat_id = $1
 	`
-
-	var id string
-	err := u.db.QueryRowContext(ctx, query, chatID).Scan(&id)
+	err := u.db.QueryRowContext(ctx, query, chatID).Scan(&chatID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	} else if err != nil {
-		return false, err
+		return false, fmt.Errorf("%w:%w", domain.ErrDb, err)
 	}
 	return true, nil
 }
 
-func (u *UserVaultStorage) Save(ctx context.Context, vault domain.UserVault) error {
+func (u *UserVaultStorage) Save(ctx context.Context, vault domain.UserVault) (err error) {
 	const query = `
 	INSERT INTO vault (chat_id, owner, repo)
 	VALUES ($1, $2, $3)
@@ -44,17 +43,20 @@ func (u *UserVaultStorage) Save(ctx context.Context, vault domain.UserVault) err
 
 	tx, err := u.db.BeginTx(ctx, nil)
 	if err != nil {
-		return err
+		return fmt.Errorf("%w:%w", domain.ErrDb, err)
 	}
 	defer func() {
 		if err != nil {
 			tx.Rollback()
 			return
 		}
-		tx.Commit()
+		err = tx.Commit()
+		if err != nil {
+			err = fmt.Errorf("%w:%w", domain.ErrDb, err)
+		}
 	}()
 	if _, err := tx.ExecContext(ctx, query, vault.ChatID, vault.Owner, vault.Repo); err != nil {
-		return err
+		return fmt.Errorf("%w:%w", domain.ErrDb, err)
 	}
 	return nil
 
@@ -68,8 +70,8 @@ func (u *UserVaultStorage) Vault(ctx context.Context, chatID int64) (domain.User
 	`
 	var vault domain.UserVault
 
-	if err := u.db.QueryRowContext(ctx, query, chatID).Scan(&vault); err != nil {
-		return domain.UserVault{}, err
+	if err := u.db.QueryRowContext(ctx, query, chatID).Scan(&vault.ChatID, &vault.Owner, &vault.Repo); err != nil {
+		return domain.UserVault{}, fmt.Errorf("%w:%w", domain.ErrDb, err)
 	}
 	return vault, nil
 }

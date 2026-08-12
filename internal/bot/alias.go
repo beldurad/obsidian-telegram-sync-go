@@ -186,7 +186,7 @@ func (a *AddAliasHandler) Handle(ctx context.Context, u bot.Update) (bot.Respons
 		return a.handleAliasSet(ctx, u, session)
 	}
 
-	return bot.Response{}, domain.ErrCantHandle
+	return bot.Response{}, ErrCantHandle
 
 }
 

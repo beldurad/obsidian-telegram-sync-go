@@ -3,6 +3,7 @@ module github.com/beldurad/obsidian-telegram-sync-go
 go 1.26.3
 
 require (
+	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/go-telegram-bot-api/telegram-bot-api/v5 v5.5.1
 	github.com/google/uuid v1.6.0
 	github.com/ilyakaznacheev/cleanenv v1.5.0

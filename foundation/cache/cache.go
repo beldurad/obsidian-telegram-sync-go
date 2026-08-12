@@ -34,7 +34,7 @@ func (c *LRUCache[K, V]) Get(key K) (value V, ok bool) {
 		return zero, false
 	}
 
-	c.delete(key)
+	c.Delete(key)
 	c.insert(node)
 	c.mu.Unlock()
 	return node.value, true
@@ -44,9 +44,9 @@ func (c *LRUCache[K, V]) Put(key K, value V) {
 	c.mu.Lock()
 	_, ok := c.cacheMap[key]
 	if len(c.cacheMap) == c.capacity && !ok {
-		c.delete(c.head.key)
+		c.Delete(c.head.key)
 	}
-	c.delete(key)
+	c.Delete(key)
 	node := &cacheNode[K, V]{
 		key:   key,
 		value: value,
@@ -55,7 +55,7 @@ func (c *LRUCache[K, V]) Put(key K, value V) {
 	c.mu.Unlock()
 }
 
-func (c *LRUCache[K, V]) delete(key K) {
+func (c *LRUCache[K, V]) Delete(key K) {
 	node, ok := c.cacheMap[key]
 	if !ok {
 		return

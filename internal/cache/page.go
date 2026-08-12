@@ -38,3 +38,11 @@ func (c *PageCountCache) Get(ctx context.Context, chatID int64, pageSize int) (c
 	})
 	return
 }
+
+func (c *PageCountCache) Delete(ctx context.Context, chatID int64, pageSize int) error {
+	c.lru.Delete(pageCountKey{
+		chatID:   chatID,
+		pageSize: pageSize,
+	})
+	return nil
+}
