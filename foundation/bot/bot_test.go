@@ -82,7 +82,7 @@ func (h *handlerMock) Handle(
 
 	resp := h.response
 
-	if resp == (bot.Response{}) {
+	if resp.Message == nil && resp.NewChatState == nil && resp.NewPayload == nil {
 		resp = bot.Response{
 			Message: tgbotapi.NewMessage(
 				u.ChatID,

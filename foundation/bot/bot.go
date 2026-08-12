@@ -2,6 +2,7 @@ package bot
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 
@@ -21,7 +22,7 @@ type Update struct {
 	Text          string
 	ButtonPressed bool
 
-	// [Update] - for more complex updates
+	// [Raw] - for more complex updates
 	Raw tgbotapi.Update
 }
 
@@ -48,15 +49,10 @@ type Response struct {
 	// New chat state resulting from the update handling
 	NewChatState *ChatState
 
-	NewPayload string
+	NewPayload json.RawMessage
 }
 
 type Command string
-
-type commonKey struct {
-	ChatState
-	Command
-}
 
 type ChatState string
 
@@ -66,7 +62,7 @@ type ChatSession struct {
 	ChatID           int64
 	State            ChatState
 	LastBotMessageID int
-	Payload          string
+	Payload          json.RawMessage
 }
 
 func NewChatSession(chatID int64) *ChatSession {
@@ -125,6 +121,11 @@ type TelegramBotClient interface {
 	Send(tgbotapi.Chattable) (tgbotapi.Message, error)
 }
 
+type handlerResolveKey struct {
+	ChatState
+	Command
+}
+
 // [Bot] is a structure responsible for
 // dispatching updates and errors
 // to the appropriate handlers.
@@ -142,7 +143,7 @@ type Bot struct {
 	// Maps for resolving update [Handler]
 	byState   map[ChatState]Handler
 	byCommand map[Command]Handler
-	byBoth    map[commonKey]Handler
+	byBoth    map[handlerResolveKey]Handler
 }
 
 func New(sessionService ChatSessionService, botClient TelegramBotClient, opts ...option) *Bot {
@@ -153,7 +154,7 @@ func New(sessionService ChatSessionService, botClient TelegramBotClient, opts ..
 		errorHandlers:  make([]ErrorHandler, 0),
 		byState:        make(map[ChatState]Handler),
 		byCommand:      make(map[Command]Handler),
-		byBoth:         make(map[commonKey]Handler),
+		byBoth:         make(map[handlerResolveKey]Handler),
 	}
 	for _, opt := range opts {
 		opt(bot)
@@ -170,7 +171,7 @@ func (b *Bot) AddHandlerForState(s ChatState, h Handler, m ...Middleware) {
 }
 
 func (b *Bot) AddHandler(c Command, s ChatState, h Handler, m ...Middleware) {
-	k := commonKey{
+	k := handlerResolveKey{
 		ChatState: s,
 		Command:   c,
 	}
@@ -178,7 +179,7 @@ func (b *Bot) AddHandler(c Command, s ChatState, h Handler, m ...Middleware) {
 }
 
 func (b *Bot) resolveHandler(c Command, s ChatState) Handler {
-	key := commonKey{
+	key := handlerResolveKey{
 		Command:   c,
 		ChatState: s,
 	}
