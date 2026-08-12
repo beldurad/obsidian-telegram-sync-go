@@ -104,7 +104,7 @@ func (m *noteTemplatesMock) Template(
 type noteStorageMock struct {
 	mock.RemoteStorage
 
-	FileFn   func(owner, repo, path string) (domain.DirElem, error)
+	FileFn     func(owner, repo, path string) (domain.DirElem, error)
 	SaveNoteFn func(
 		ctx context.Context,
 		owner, repo string,
@@ -299,11 +299,16 @@ func TestNoteAddHandler_Handle_NextPage(t *testing.T) {
 		&vaultGetterMock{},
 	)
 
+	rawPayload, err := json.Marshal(pagePayload{
+		PageNum: 0,
+	})
+	require.NoError(t, err)
+
 	session := bot.ChatSession{
 		ChatID:           123,
 		State:            StateNoteWaitAlias,
 		LastBotMessageID: 456,
-		Payload:          `{"page":0}`,
+		Payload:          rawPayload,
 	}
 
 	resp, err := h.Handle(
@@ -343,10 +348,15 @@ func TestNoteAddHandler_Handle_PrevPage(t *testing.T) {
 		&vaultGetterMock{},
 	)
 
+	rawPayload, err := json.Marshal(pagePayload{
+		PageNum: 1,
+	})
+	require.NoError(t, err)
+
 	session := bot.ChatSession{
 		ChatID:  123,
 		State:   StateNoteWaitAlias,
-		Payload: `{"page":1}`,
+		Payload: rawPayload,
 	}
 
 	resp, err := h.Handle(
@@ -393,11 +403,16 @@ func TestNoteAddHandler_Handle_SelectAlias(t *testing.T) {
 		&vaultGetterMock{},
 	)
 
+	rawPayload, err := json.Marshal(pagePayload{
+		PageNum: 0,
+	})
+	require.NoError(t, err)
+
 	session := bot.ChatSession{
 		ChatID:           123,
 		State:            StateNoteWaitAlias,
 		LastBotMessageID: 456,
-		Payload:          `{"page":0}`,
+		Payload:          rawPayload,
 	}
 
 	resp, err := h.Handle(
@@ -458,10 +473,15 @@ func TestNoteAddHandler_Handle_UnknownState_SelectsAlias(t *testing.T) {
 		&vaultGetterMock{},
 	)
 
+	rawPayload, err := json.Marshal(pagePayload{
+		PageNum: 0,
+	})
+	require.NoError(t, err)
+
 	session := bot.ChatSession{
 		ChatID:  123,
 		State:   bot.ChatState("UNKNOWN_STATE"),
-		Payload: `{"page":0}`,
+		Payload: rawPayload,
 	}
 
 	resp, err := h.Handle(
@@ -498,7 +518,7 @@ func TestNoteAddHandler_Handle_InvalidPayload(t *testing.T) {
 	session := bot.ChatSession{
 		ChatID:  123,
 		State:   StateNoteWaitAlias,
-		Payload: "not-json",
+		Payload: []byte("not-json"),
 	}
 
 	resp, err := h.Handle(
@@ -532,10 +552,15 @@ func TestNoteAddHandler_Handle_SelectAlias_AliasError(t *testing.T) {
 		&vaultGetterMock{},
 	)
 
+	rawPayload, err := json.Marshal(pagePayload{
+		PageNum: 0,
+	})
+	require.NoError(t, err)
+
 	session := bot.ChatSession{
 		ChatID:  123,
 		State:   StateNoteWaitAlias,
-		Payload: `{"page":0}`,
+		Payload: rawPayload,
 	}
 
 	resp, err := h.Handle(
@@ -570,10 +595,15 @@ func TestNoteAddHandler_Handle_SelectAlias_TemplatesError(t *testing.T) {
 		&vaultGetterMock{},
 	)
 
+	rawPayload, err := json.Marshal(pagePayload{
+		PageNum: 0,
+	})
+	require.NoError(t, err)
+
 	session := bot.ChatSession{
 		ChatID:  123,
 		State:   StateNoteWaitAlias,
-		Payload: `{"page":0}`,
+		Payload: rawPayload,
 	}
 
 	resp, err := h.Handle(
@@ -654,7 +684,7 @@ func TestNoteAddHandler_Handle_SelectTemplate(t *testing.T) {
 		ChatID:           123,
 		State:            StateNoteWaitTemplate,
 		LastBotMessageID: 456,
-		Payload:          string(raw),
+		Payload:          raw,
 	}
 
 	resp, err := h.Handle(
@@ -707,7 +737,7 @@ func TestNoteAddHandler_Handle_Template_NextPage(t *testing.T) {
 	)
 
 	raw, err := json.Marshal(noteAddPayload{
-		Path:      "/notes/inbox",
+		Path: "/notes/inbox",
 		TemplatePage: pagePayload{
 			PageNum: 1,
 		},
@@ -717,7 +747,7 @@ func TestNoteAddHandler_Handle_Template_NextPage(t *testing.T) {
 	session := bot.ChatSession{
 		ChatID:  123,
 		State:   StateNoteWaitTemplate,
-		Payload: string(raw),
+		Payload: raw,
 	}
 
 	resp, err := h.Handle(
@@ -761,7 +791,7 @@ func TestNoteAddHandler_Handle_Template_InvalidPayload(t *testing.T) {
 	session := bot.ChatSession{
 		ChatID:  123,
 		State:   StateNoteWaitTemplate,
-		Payload: "not-json",
+		Payload: []byte("not-json"),
 	}
 
 	resp, err := h.Handle(
@@ -803,7 +833,7 @@ func TestNoteAddHandler_Handle_Template_TemplateError(t *testing.T) {
 	session := bot.ChatSession{
 		ChatID:  123,
 		State:   StateNoteWaitTemplate,
-		Payload: string(raw),
+		Payload: raw,
 	}
 
 	resp, err := h.Handle(
@@ -853,7 +883,7 @@ func TestNoteAddHandler_Handle_Text_ExistingFile(t *testing.T) {
 	session := bot.ChatSession{
 		ChatID:  123,
 		State:   StateNoteWaitText,
-		Payload: string(raw),
+		Payload: raw,
 	}
 
 	resp, err := h.Handle(
@@ -914,7 +944,7 @@ func TestNoteAddHandler_Handle_Text_FileNotFound(t *testing.T) {
 	session := bot.ChatSession{
 		ChatID:  123,
 		State:   StateNoteWaitText,
-		Payload: string(raw),
+		Payload: raw,
 	}
 
 	resp, err := h.Handle(
@@ -970,7 +1000,7 @@ func TestNoteAddHandler_Handle_Text_NotFileType(t *testing.T) {
 	session := bot.ChatSession{
 		ChatID:  123,
 		State:   StateNoteWaitText,
-		Payload: string(raw),
+		Payload: raw,
 	}
 
 	resp, err := h.Handle(
@@ -1007,7 +1037,7 @@ func TestNoteAddHandler_Handle_Text_ClientError(t *testing.T) {
 	session := bot.ChatSession{
 		ChatID:  123,
 		State:   StateNoteWaitText,
-		Payload: string(raw),
+		Payload: raw,
 	}
 
 	resp, err := h.Handle(
@@ -1040,7 +1070,7 @@ func TestNoteAddHandler_Handle_Text_VaultError(t *testing.T) {
 	session := bot.ChatSession{
 		ChatID:  123,
 		State:   StateNoteWaitText,
-		Payload: string(raw),
+		Payload: raw,
 	}
 
 	resp, err := h.Handle(
@@ -1088,7 +1118,7 @@ func TestNoteAddHandler_Handle_Text_SaveNoteError(t *testing.T) {
 	session := bot.ChatSession{
 		ChatID:  123,
 		State:   StateNoteWaitText,
-		Payload: string(raw),
+		Payload: raw,
 	}
 
 	resp, err := h.Handle(
@@ -1129,7 +1159,7 @@ func TestNoteAddHandler_Handle_Filename(t *testing.T) {
 	session := bot.ChatSession{
 		ChatID:  123,
 		State:   StateNoteWaitFilename,
-		Payload: string(raw),
+		Payload: raw,
 	}
 
 	resp, err := h.Handle(
@@ -1179,7 +1209,7 @@ func TestNoteAddHandler_Handle_Filename_NoTrailingSlash(t *testing.T) {
 	session := bot.ChatSession{
 		ChatID:  123,
 		State:   StateNoteWaitFilename,
-		Payload: string(raw),
+		Payload: raw,
 	}
 
 	_, err = h.Handle(
@@ -1212,7 +1242,7 @@ func TestNoteAddHandler_Handle_Filename_Root(t *testing.T) {
 	session := bot.ChatSession{
 		ChatID:  123,
 		State:   StateNoteWaitFilename,
-		Payload: string(raw),
+		Payload: raw,
 	}
 
 	_, err = h.Handle(
@@ -1240,7 +1270,7 @@ func TestNoteAddHandler_Handle_Filename_InvalidPayload(t *testing.T) {
 	session := bot.ChatSession{
 		ChatID:  123,
 		State:   StateNoteWaitFilename,
-		Payload: "not-json",
+		Payload: []byte("not-json"),
 	}
 
 	resp, err := h.Handle(
@@ -1284,7 +1314,7 @@ func TestNoteAddHandler_Handle_Filename_SaveNoteError(t *testing.T) {
 	session := bot.ChatSession{
 		ChatID:  123,
 		State:   StateNoteWaitFilename,
-		Payload: string(raw),
+		Payload: raw,
 	}
 
 	resp, err := h.Handle(

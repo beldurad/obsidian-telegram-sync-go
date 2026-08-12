@@ -121,7 +121,7 @@ func (a *AddNoteHandler) handleWaitAlias(ctx context.Context, s bot.ChatSession,
 		return bot.Response{
 			Message:      msgCfg,
 			NewChatState: &StateNoteWaitTemplate,
-			NewPayload:   string(bytes),
+			NewPayload:   bytes,
 		}, nil
 	}
 
@@ -146,7 +146,7 @@ func (a *AddNoteHandler) handleWaitAlias(ctx context.Context, s bot.ChatSession,
 	}
 	return bot.Response{
 		Message:    c,
-		NewPayload: string(bytes),
+		NewPayload: bytes,
 	}, nil
 
 }
@@ -216,7 +216,7 @@ func (a *AddNoteHandler) handleWaitTemplate(ctx context.Context, s bot.ChatSessi
 		return bot.Response{
 			Message:      msgCfg,
 			NewChatState: &StateNoteWaitText,
-			NewPayload:   string(bytes),
+			NewPayload:   bytes,
 		}, nil
 	}
 
@@ -232,7 +232,7 @@ func (a *AddNoteHandler) handleWaitTemplate(ctx context.Context, s bot.ChatSessi
 	}
 	return bot.Response{
 		Message:    msgCfg,
-		NewPayload: string(bytes),
+		NewPayload: bytes,
 	}, nil
 }
 
@@ -301,7 +301,7 @@ func (a *AddNoteHandler) handleWaitText(ctx context.Context, s bot.ChatSession, 
 		return bot.Response{
 			Message:      msgCfg,
 			NewChatState: &StateNoteWaitFilename,
-			NewPayload:   string(bytes),
+			NewPayload:   bytes,
 		}, nil
 	}
 

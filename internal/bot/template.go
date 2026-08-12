@@ -127,7 +127,7 @@ func (h *GetTemplateHandler) Handle(ctx context.Context, u bot.Update) (bot.Resp
 	return bot.Response{
 		Message:      c,
 		NewChatState: &StateGetTemplate,
-		NewPayload:   string(bytes),
+		NewPayload:   bytes,
 	}, nil
 }
 
@@ -208,11 +208,11 @@ func (a *TemplateAddHandler) handleDefault(chatID int64) (bot.Response, error) {
 			"Введите шаблон, используя {} как плейсхолдер",
 		),
 		NewChatState: &StateWaitTemplateValue,
-		NewPayload:   string(bytes),
+		NewPayload:   bytes,
 	}, nil
 }
 
-func (a *TemplateAddHandler) handleValue(chatID int64, value string, rawPayload string) (bot.Response, error) {
+func (a *TemplateAddHandler) handleValue(chatID int64, value string, rawPayload json.RawMessage) (bot.Response, error) {
 	var payload templateBuilder
 	err := json.Unmarshal([]byte(rawPayload), &payload)
 	if err != nil {
@@ -231,11 +231,11 @@ func (a *TemplateAddHandler) handleValue(chatID int64, value string, rawPayload 
 			`,
 		),
 		NewChatState: &StateWaitTemplateName,
-		NewPayload:   string(bytes),
+		NewPayload:   bytes,
 	}, nil
 }
 
-func (a *TemplateAddHandler) handleName(ctx context.Context, chatID int64, name string, rawPayload string) (bot.Response, error) {
+func (a *TemplateAddHandler) handleName(ctx context.Context, chatID int64, name string, rawPayload json.RawMessage) (bot.Response, error) {
 	var payload templateBuilder
 	err := json.Unmarshal([]byte(rawPayload), &payload)
 	if err != nil {

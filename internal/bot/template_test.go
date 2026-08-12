@@ -115,7 +115,7 @@ func TestGetTemplateHandler_Handle_NextPage(t *testing.T) {
 			bot.ChatSession{
 				ChatID:  123,
 				State:   StateGetTemplate,
-				Payload: string(raw),
+				Payload: raw,
 			}),
 		bot.Update{
 			ChatID: 123,
@@ -160,7 +160,7 @@ func TestGetTemplateHandler_Handle_PrevPage(t *testing.T) {
 			bot.ChatSession{
 				ChatID:  123,
 				State:   StateGetTemplate,
-				Payload: string(raw),
+				Payload: raw,
 			}),
 		bot.Update{
 			ChatID: 123,
@@ -197,7 +197,7 @@ func TestGetTemplateHandler_Handle_InvalidPayload(t *testing.T) {
 			bot.ChatSession{
 				ChatID:  123,
 				State:   StateGetTemplate,
-				Payload: "invalid-json",
+				Payload: []byte("invalid-json"),
 			}),
 		bot.Update{
 			ChatID: 123,
@@ -268,7 +268,7 @@ func TestGetTemplateHandler_Handle_EditExistingMessage(t *testing.T) {
 				ChatID:           123,
 				State:            StateGetTemplate,
 				LastBotMessageID: 456,
-				Payload:          string(raw),
+				Payload:          raw,
 			}),
 		bot.Update{
 			ChatID: 123,
@@ -374,7 +374,7 @@ func TestTemplateAddHandler_Handle_ValueState(t *testing.T) {
 			bot.ChatSession{
 				ChatID:  123,
 				State:   StateWaitTemplateValue,
-				Payload: string(rawPayload),
+				Payload: rawPayload,
 			}),
 		bot.Update{
 			ChatID: 123,
@@ -418,7 +418,7 @@ func TestTemplateAddHandler_Handle_ValueState_InvalidPayload(t *testing.T) {
 			bot.ChatSession{
 				ChatID:  123,
 				State:   StateWaitTemplateValue,
-				Payload: "invalid-json",
+				Payload: []byte("invalid-json"),
 			}),
 		bot.Update{
 			ChatID: 123,
@@ -455,7 +455,7 @@ func TestTemplateAddHandler_Handle_NameState(t *testing.T) {
 		bot.ChatSession{
 			ChatID:  chatID,
 			State:   StateWaitTemplateName,
-			Payload: string(rawPayload),
+			Payload: rawPayload,
 		})
 
 	resp, err := handler.Handle(
@@ -515,7 +515,7 @@ func TestTemplateAddHandler_Handle_NameState_SaveError(t *testing.T) {
 			bot.ChatSession{
 				ChatID:  123,
 				State:   StateWaitTemplateName,
-				Payload: string(rawPayload),
+				Payload: rawPayload,
 			}),
 		bot.Update{
 			ChatID: 123,

@@ -133,7 +133,7 @@ func (h *GetAliasesHandler) Handle(ctx context.Context, u bot.Update) (bot.Respo
 	return bot.Response{
 		Message:      c,
 		NewChatState: &StateGetAlias,
-		NewPayload:   string(bytes),
+		NewPayload:   bytes,
 	}, nil
 }
 
@@ -248,7 +248,7 @@ func (a *AddAliasHandler) handlePathSet(ctx context.Context, u bot.Update, s bot
 		return bot.Response{
 			Message:      msgCfg,
 			NewChatState: &StateWaitAlias,
-			NewPayload:   string(bytes),
+			NewPayload:   bytes,
 		}, nil
 	} else if u.Text != NextPageCommand && u.Text != PrevPageCommand {
 		payload.CurPath, err = url.JoinPath(payload.CurPath, u.Text)
@@ -276,7 +276,7 @@ func (a *AddAliasHandler) handlePathSet(ctx context.Context, u bot.Update, s bot
 		return bot.Response{
 			Message:      msgCfg,
 			NewChatState: &StateWaitAlias,
-			NewPayload:   string(bytes),
+			NewPayload:   bytes,
 		}, nil
 
 	} else if err != nil {
@@ -300,7 +300,7 @@ func (a *AddAliasHandler) handlePathSet(ctx context.Context, u bot.Update, s bot
 	return bot.Response{
 		Message:      msgCfg,
 		NewChatState: &StateWaitPath,
-		NewPayload:   string(bytes),
+		NewPayload:   bytes,
 	}, nil
 }
 

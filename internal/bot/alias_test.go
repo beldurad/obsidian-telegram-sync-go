@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"testing"
 
 	"github.com/beldurad/obsidian-telegram-sync-go/foundation/bot"
@@ -145,11 +144,16 @@ func TestGetAliasesHandler_Handle_NextPage(t *testing.T) {
 
 	h := NewGetAliasesHandler(getter)
 
+	rawPayload, err := json.Marshal(pagePayload{
+		PageNum: 0,
+	})
+	require.NoError(t, err)
+
 	session := bot.ChatSession{
 		ChatID:           123,
 		State:            StateGetAlias,
 		LastBotMessageID: 42,
-		Payload:          `{"pageNum":0}`,
+		Payload:          rawPayload,
 	}
 
 	ctx := context.WithValue(
@@ -181,10 +185,14 @@ func TestGetAliasesHandler_Handle_PrevPage_DoesNotGoBelowZero(t *testing.T) {
 
 	h := NewGetAliasesHandler(getter)
 
+	rawPayload, err := json.Marshal(pagePayload{
+		PageNum: 0,
+	})
+	require.NoError(t, err)
 	session := bot.ChatSession{
 		ChatID:  123,
 		State:   StateGetAlias,
-		Payload: `{"pageNum":0}`,
+		Payload: rawPayload,
 	}
 
 	ctx := context.WithValue(
@@ -193,7 +201,7 @@ func TestGetAliasesHandler_Handle_PrevPage_DoesNotGoBelowZero(t *testing.T) {
 		session,
 	)
 
-	_, err := h.Handle(ctx, bot.Update{
+	_, err = h.Handle(ctx, bot.Update{
 		ChatID: 123,
 		Text:   PrevPageCommand,
 	})
@@ -209,7 +217,7 @@ func TestGetAliasesHandler_Handle_InvalidPayload(t *testing.T) {
 	session := bot.ChatSession{
 		ChatID:  123,
 		State:   StateGetAlias,
-		Payload: `not-json`,
+		Payload: []byte(`not-json`),
 	}
 
 	ctx := context.WithValue(
@@ -310,14 +318,14 @@ func TestGetAliasesHandler_Handle_PaginationButtons(t *testing.T) {
 				},
 			}
 			getter.page.Values = values
-			payload := fmt.Sprintf(
-				`{"pageNum":%d}`,
-				tt.prevPageNum,
-			)
+			rawPayload, err := json.Marshal(pagePayload{
+				PageNum: tt.prevPageNum,
+			})
+			require.NoError(t, err)
 			session := bot.ChatSession{
 				ChatID:  123,
 				State:   StateGetAlias,
-				Payload: payload,
+				Payload: rawPayload,
 			}
 
 			ctx := context.WithValue(
@@ -615,7 +623,7 @@ func TestAddAliasHandler_Handle_WaitPath_UsesPayload(t *testing.T) {
 		bot.ChatSession{
 			ChatID:  123,
 			State:   StateWaitPath,
-			Payload: string(raw),
+			Payload: raw,
 		})
 
 	resp, err := h.Handle(ctx, bot.Update{
@@ -664,7 +672,7 @@ func TestAddAliasHandler_Handle_SelectCurrentDirectory(t *testing.T) {
 		ChatID:           123,
 		State:            StateWaitPath,
 		LastBotMessageID: 456,
-		Payload:          string(raw),
+		Payload:          raw,
 	}
 
 	resp, err := h.Handle(
@@ -741,7 +749,7 @@ func TestAddAliasHandler_HandlePathSet_FileSelected(t *testing.T) {
 				ChatID:           123,
 				State:            StateWaitPath,
 				LastBotMessageID: 456,
-				Payload:          string(raw),
+				Payload:          raw,
 			}),
 		bot.Update{
 			ChatID: 123,
@@ -791,7 +799,7 @@ func TestAddAliasHandler_handleAliasSet_Success(t *testing.T) {
 	session := bot.ChatSession{
 		ChatID:  123,
 		State:   StateWaitAlias,
-		Payload: string(payload),
+		Payload: payload,
 	}
 
 	resp, err := handler.handleAliasSet(
@@ -830,7 +838,7 @@ func TestAddAliasHandler_handleAliasSet_InvalidPayload(t *testing.T) {
 	session := bot.ChatSession{
 		ChatID:  123,
 		State:   StateWaitAlias,
-		Payload: "invalid json",
+		Payload: []byte("invalid json"),
 	}
 
 	resp, err := handler.handleAliasSet(
@@ -864,7 +872,7 @@ func TestAddAliasHandler_handleAliasSet_InvalidUUID(t *testing.T) {
 	session := bot.ChatSession{
 		ChatID:  123,
 		State:   StateWaitAlias,
-		Payload: payload,
+		Payload: []byte(payload),
 	}
 
 	resp, err := handler.handleAliasSet(
@@ -904,7 +912,7 @@ func TestAddAliasHandler_handleAliasSet_SaveError(t *testing.T) {
 	session := bot.ChatSession{
 		ChatID:  123,
 		State:   StateWaitAlias,
-		Payload: string(payload),
+		Payload: payload,
 	}
 
 	resp, err := handler.handleAliasSet(
