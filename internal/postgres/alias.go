@@ -3,12 +3,15 @@ package postgres
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log"
 	"math"
 
 	"github.com/beldurad/obsidian-telegram-sync-go/internal/domain"
 	"github.com/google/uuid"
+	"github.com/lib/pq"
+	"github.com/lib/pq/pqerror"
 )
 
 type AliasPageCountCache interface {
@@ -58,6 +61,10 @@ func (s *AliasStorage) Save(ctx context.Context, a domain.Alias) (err error) {
 		a.Alias,
 	)
 	if err != nil {
+		pqErr := new(pq.Error)
+		if errors.As(err, &pqErr) && pqErr.Code == pqerror.UniqueViolation {
+			return fmt.Errorf("%w:%w:%w", domain.ErrAlreadyExists, domain.ErrDb, err)
+		}
 		return fmt.Errorf("%w:%w", domain.ErrDb, err)
 	}
 	if err := s.pageCountCache.Delete(ctx, a.ChatID, domain.DefaultPageSize); err != nil {

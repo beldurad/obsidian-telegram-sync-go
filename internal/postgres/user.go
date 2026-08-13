@@ -7,6 +7,8 @@ import (
 	"fmt"
 
 	"github.com/beldurad/obsidian-telegram-sync-go/internal/domain"
+	"github.com/lib/pq"
+	"github.com/lib/pq/pqerror"
 )
 
 type UserVaultStorage struct {
@@ -55,7 +57,12 @@ func (u *UserVaultStorage) Save(ctx context.Context, vault domain.UserVault) (er
 			err = fmt.Errorf("%w:%w", domain.ErrDb, err)
 		}
 	}()
-	if _, err := tx.ExecContext(ctx, query, vault.ChatID, vault.Owner, vault.Repo); err != nil {
+	_, err = tx.ExecContext(ctx, query, vault.ChatID, vault.Owner, vault.Repo)
+	if err != nil {
+		pqErr := new(pq.Error)
+		if errors.As(err, &pqErr) && pqErr.Code == pqerror.UniqueViolation {
+			return fmt.Errorf("%w:%w:%w", domain.ErrAlreadyExists, domain.ErrDb, err)
+		}
 		return fmt.Errorf("%w:%w", domain.ErrDb, err)
 	}
 	return nil
