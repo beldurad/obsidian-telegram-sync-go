@@ -1,10 +1,12 @@
-name: CI
+name: CI/CD
 
 on:
   push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
+    branches:
+      - main
+
+permissions:
+  contents: read
 
 jobs:
   test:
@@ -13,25 +15,63 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      
+
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
-        
-      - name: Download dependencies
-        run: go mod download
 
-      - name: Check formatting
-        run: |
-          test -z "$(gofmt -l .)"
-      
-      - name: Vet
-        run: go vet ./...
-      
       - name: Test
         run: go test ./...
-      
+
+      - name: Vet
+        run: go vet ./...
+
       - name: Build
-        run: go build ./...
+        run: |
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+            go build -o obstg ./cmd/obstg
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: obstg
+          path: obstg
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download binary
+        uses: actions/download-artifact@v4
+        with:
+          name: obstg
+
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+
+          ssh-keyscan -H "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Deploy
+        env:
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          USER: ${{ secrets.DEPLOY_USER }}
+          SHA: ${{ github.sha }}
+        run: |
+          ssh -i ~/.ssh/deploy_key "$USER@$HOST" \
+            "mkdir -p /opt/obstg/releases/$SHA"
+
+          scp -i ~/.ssh/deploy_key \
+            myapp \
+            "$USER@$HOST:/opt/myapp/releases/$SHA/myapp"
+
+          ssh -i ~/.ssh/deploy_key "$USER@$HOST" "
+            chmod +x /opt/myapp/releases/$SHA/myapp &&
+            ln -sfn /opt/myapp/releases/$SHA /opt/myapp/bin &&
+            sudo systemctl restart myapp
+          "
