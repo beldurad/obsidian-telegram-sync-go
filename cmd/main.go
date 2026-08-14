@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -58,30 +59,16 @@ func main() {
 
 	b := bot.Init(cfg.TelegramConfig, sessionService)
 
-	b.AddHandlerForCommand(bot.CommandGetAliases, aliasGetHandler)
-	b.AddHandlerForState(bot.StateGetAlias, aliasGetHandler)
+	aliasGetHandler.Register(b)
+	aliasAddHandler.Register(b)
+	authHandler.Register(b)
+	templateGetHandler.Register(b)
+	templateAddHandler.Register(b)
+	repoHandler.Register(b)
+	noteAddHandler.Register(b)
 
-	b.AddHandlerForCommand(bot.CommandAddAlias, aliasAddHandler)
-	b.AddHandlerForState(bot.StateWaitPath, aliasAddHandler)
-	b.AddHandlerForState(bot.StateWaitAlias, aliasAddHandler)
-
-	b.AddHandlerForCommand(bot.CommandGetTemplates, templateGetHandler)
-	b.AddHandlerForState(bot.StateGetTemplate, templateGetHandler)
-
-	b.AddHandlerForCommand(bot.CommandAddTemplate, templateAddHandler)
-	b.AddHandlerForState(bot.StateWaitTemplateValue, templateAddHandler)
-	b.AddHandlerForState(bot.StateWaitTemplateName, templateAddHandler)
-
-	b.AddHandlerForCommand(bot.CommandStart, authHandler)
-
-	b.AddHandlerForCommand(bot.RepoSetCommand, repoHandler)
-	b.AddHandlerForState(bot.RepoSetState, repoHandler)
-
-	b.AddHandlerForCommand(bot.CommandAddNote, noteAddHandler)
-	b.AddHandlerForState(bot.StateNoteWaitAlias, noteAddHandler)
-	b.AddHandlerForState(bot.StateNoteWaitTemplate, noteAddHandler)
-	b.AddHandlerForState(bot.StateNoteWaitText, noteAddHandler)
-	b.AddHandlerForState(bot.StateNoteWaitFilename, noteAddHandler)
+	logMiddleware := bot.NewLogMiddleware(slog.Default())
+	b.Use(logMiddleware.Middleware())
 
 	server := http.StartServer(cfg.ServerConfig, oauthService)
 

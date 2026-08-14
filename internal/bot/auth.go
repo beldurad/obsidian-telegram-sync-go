@@ -34,6 +34,10 @@ func NewAuthHandler(authService AuthService) *AuthHandler {
 	}
 }
 
+func (h *AuthHandler) Register(b *bot.Bot, m ...bot.Middleware) {
+	b.AddHandlerForCommand(CommandStart, h, m...)
+}
+
 func (h *AuthHandler) Handle(ctx context.Context, u bot.Update) (bot.Response, error) {
 	chatSession := ctx.Value(bot.ChatSessionKey).(bot.ChatSession)
 

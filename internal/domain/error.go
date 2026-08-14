@@ -2,10 +2,12 @@ package domain
 
 import "fmt"
 
-var ErrClient = fmt.Errorf("Client error")
-var ErrNotFound = fmt.Errorf("Resource not found")
-var ErrNotDirectory = fmt.Errorf("Resource is not directory")
-var ErrUnknown = fmt.Errorf("Unknown error")
-var ErrDb error = fmt.Errorf("DB error")
-var ErrBadArgument error = fmt.Errorf("Bad argument error")
-var ErrAlreadyExists = fmt.Errorf("Resource already exists")
+var (
+	ErrClient        = fmt.Errorf("Client error")
+	ErrNotFound      = fmt.Errorf("Resource not found")
+	ErrNotDirectory  = fmt.Errorf("Resource is not directory")
+	ErrUnknown       = fmt.Errorf("Unknown error")
+	ErrDb            = fmt.Errorf("DB error")
+	ErrBadArgument   = fmt.Errorf("Bad argument error")
+	ErrAlreadyExists = fmt.Errorf("Resource already exists")
+)

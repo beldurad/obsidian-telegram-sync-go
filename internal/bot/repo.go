@@ -48,6 +48,11 @@ func NewRepoSetHandler(clientGetter ClientGetter, vaultService UserVaultService)
 	}
 }
 
+func (h *RepoSetHandler) Register(b *bot.Bot, m ...bot.Middleware) {
+	b.AddHandlerForCommand(RepoSetCommand, h)
+	b.AddHandlerForState(RepoSetState, h)
+}
+
 func (h *RepoSetHandler) Handle(ctx context.Context, u bot.Update) (bot.Response, error) {
 	session := ctx.Value(bot.ChatSessionKey).(bot.ChatSession)
 	chatID := session.ChatID
@@ -130,7 +135,7 @@ func (h *RepoSetHandler) Handle(ctx context.Context, u bot.Update) (bot.Response
 	return bot.Response{
 		Message:      c,
 		NewChatState: &RepoSetState,
-		NewPayload:   string(bytes),
+		NewPayload:   bytes,
 	}, nil
 
 }

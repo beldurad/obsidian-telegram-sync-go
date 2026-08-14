@@ -69,6 +69,14 @@ func NewAddNoteHandler(aliasService AliasService, templateService TemplateServic
 	}
 }
 
+func (a *AddNoteHandler) Register(b *bot.Bot, m ...bot.Middleware) {
+	b.AddHandlerForCommand(CommandAddNote, a)
+	b.AddHandlerForState(StateNoteWaitAlias, a)
+	b.AddHandlerForState(StateNoteWaitTemplate, a)
+	b.AddHandlerForState(StateNoteWaitText, a)
+	b.AddHandlerForState(StateNoteWaitFilename, a)
+}
+
 func (a *AddNoteHandler) Handle(ctx context.Context, u bot.Update) (bot.Response, error) {
 	session := ctx.Value(bot.ChatSessionKey).(bot.ChatSession)
 

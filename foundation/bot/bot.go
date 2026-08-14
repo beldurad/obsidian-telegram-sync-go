@@ -144,17 +144,20 @@ type Bot struct {
 	byState   map[ChatState]Handler
 	byCommand map[Command]Handler
 	byBoth    map[handlerResolveKey]Handler
+
+	globalMiddlewares []Middleware
 }
 
 func New(sessionService ChatSessionService, botClient TelegramBotClient, opts ...option) *Bot {
 	bot := &Bot{
-		workerPoolSize: defaultWorkerPoolSize,
-		tgBot:          botClient,
-		sessionService: sessionService,
-		errorHandlers:  make([]ErrorHandler, 0),
-		byState:        make(map[ChatState]Handler),
-		byCommand:      make(map[Command]Handler),
-		byBoth:         make(map[handlerResolveKey]Handler),
+		workerPoolSize:    defaultWorkerPoolSize,
+		tgBot:             botClient,
+		sessionService:    sessionService,
+		errorHandlers:     make([]ErrorHandler, 0),
+		byState:           make(map[ChatState]Handler),
+		byCommand:         make(map[Command]Handler),
+		byBoth:            make(map[handlerResolveKey]Handler),
+		globalMiddlewares: make([]Middleware, 0),
 	}
 	for _, opt := range opts {
 		opt(bot)
@@ -176,6 +179,10 @@ func (b *Bot) AddHandler(c Command, s ChatState, h Handler, m ...Middleware) {
 		Command:   c,
 	}
 	b.byBoth[k] = merge(h, m...)
+}
+
+func (b *Bot) Use(m Middleware) {
+	b.globalMiddlewares = append(b.globalMiddlewares, m)
 }
 
 func (b *Bot) resolveHandler(c Command, s ChatState) Handler {
@@ -226,6 +233,9 @@ func (b *Bot) handle(ctx context.Context, u tgbotapi.Update) {
 	handler := b.resolveHandler(Command(update.Text), session.State)
 	if handler == nil {
 		return
+	}
+	for i := len(b.globalMiddlewares) - 1; i >= 0; i-- {
+		handler = b.globalMiddlewares[i](handler)
 	}
 
 	ctx = context.WithValue(ctx, ChatSessionKey, session)

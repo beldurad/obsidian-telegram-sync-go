@@ -44,6 +44,11 @@ func NewGetTemplateHandler(getter TemplateGetter) *GetTemplateHandler {
 	}
 }
 
+func (h *GetTemplateHandler) Register(b *bot.Bot, m ...bot.Middleware) {
+	b.AddHandlerForCommand(CommandGetTemplates, h, m...)
+	b.AddHandlerForState(StateGetTemplate, h, m...)
+}
+
 func (h *GetTemplateHandler) Handle(ctx context.Context, u bot.Update) (bot.Response, error) {
 	chatSession := ctx.Value(bot.ChatSessionKey).(bot.ChatSession)
 
@@ -179,6 +184,12 @@ func (p templateBuilder) toTemplate() (domain.Template, error) {
 		Value:     p.Value,
 		CreatedAt: createdAt,
 	}, nil
+}
+
+func (a *TemplateAddHandler) Register(b *bot.Bot, m ...bot.Middleware) {
+	b.AddHandlerForCommand(CommandAddTemplate, a, m...)
+	b.AddHandlerForState(StateWaitTemplateValue, a, m...)
+	b.AddHandlerForState(StateWaitTemplateName, a, m...)
 }
 
 func (a *TemplateAddHandler) Handle(ctx context.Context, u bot.Update) (bot.Response, error) {

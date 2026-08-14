@@ -212,7 +212,7 @@ func TestRepoSetHandler_Handle_NextPage(t *testing.T) {
 			bot.ChatSession{
 				ChatID:  123,
 				State:   RepoSetState,
-				Payload: string(raw),
+				Payload: raw,
 			},
 		),
 		bot.Update{
@@ -265,7 +265,7 @@ func TestRepoSetHandler_Handle_PrevPage(t *testing.T) {
 			bot.ChatSession{
 				ChatID:  123,
 				State:   RepoSetState,
-				Payload: string(raw),
+				Payload: raw,
 			},
 		),
 		bot.Update{

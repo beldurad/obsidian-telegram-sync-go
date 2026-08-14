@@ -49,6 +49,11 @@ func NewGetAliasesHandler(getter AliasesGetter) *GetAliasesHandler {
 	}
 }
 
+func (h *GetAliasesHandler) Register(b *bot.Bot, m ...bot.Middleware) {
+	b.AddHandlerForCommand(CommandGetAliases, h, m...)
+	b.AddHandlerForState(StateGetAlias, h, m...)
+}
+
 func (h *GetAliasesHandler) Handle(ctx context.Context, u bot.Update) (bot.Response, error) {
 	session := ctx.Value(bot.ChatSessionKey).(bot.ChatSession)
 
@@ -174,6 +179,12 @@ func NewAddAliasHandler(vaultGetter UserVaultGetter, clientGetter ClientGetter, 
 		clientGetter: clientGetter,
 		saver:        saver,
 	}
+}
+
+func (a *AddAliasHandler) Register(b *bot.Bot, m ...bot.Middleware) {
+	b.AddHandlerForCommand(CommandAddAlias, a, m...)
+	b.AddHandlerForState(StateWaitPath, a, m...)
+	b.AddHandlerForState(StateWaitAlias, a, m...)
 }
 
 func (a *AddAliasHandler) Handle(ctx context.Context, u bot.Update) (bot.Response, error) {
