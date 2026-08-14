@@ -31,7 +31,7 @@ jobs:
       - name: Build
         run: |
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-            go build -o obstg ./cmd/obstg
+            go build -o obstg ./cmd/
 
       - name: Upload binary
         uses: actions/upload-artifact@v4
@@ -67,11 +67,11 @@ jobs:
             "mkdir -p /opt/obstg/releases/$SHA"
 
           scp -i ~/.ssh/deploy_key \
-            myapp \
-            "$USER@$HOST:/opt/myapp/releases/$SHA/myapp"
+            obstg \
+            "$USER@$HOST:/opt/obstg/releases/$SHA/obstg"
 
           ssh -i ~/.ssh/deploy_key "$USER@$HOST" "
-            chmod +x /opt/myapp/releases/$SHA/myapp &&
-            ln -sfn /opt/myapp/releases/$SHA /opt/myapp/bin &&
-            sudo systemctl restart myapp
+            chmod +x /opt/obstg/releases/$SHA/obstg &&
+            ln -sfn /opt/obstg/releases/$SHA /opt/obstg/bin &&
+            sudo systemctl restart obstg
           "
