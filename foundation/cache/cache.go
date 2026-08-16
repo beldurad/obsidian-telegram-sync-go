@@ -29,33 +29,33 @@ func NewLRU[K comparable, V any](capacity int) *LRUCache[K, V] {
 func (c *LRUCache[K, V]) Get(key K) (value V, ok bool) {
 	var zero V
 	c.mu.Lock()
+	defer c.mu.Unlock()
 	node, ok := c.cacheMap[key]
 	if !ok {
 		return zero, false
 	}
 
-	c.Delete(key)
+	c.delete(key)
 	c.insert(node)
-	c.mu.Unlock()
 	return node.value, true
 }
 
 func (c *LRUCache[K, V]) Put(key K, value V) {
 	c.mu.Lock()
+	defer c.mu.Unlock()
 	_, ok := c.cacheMap[key]
 	if len(c.cacheMap) == c.capacity && !ok {
-		c.Delete(c.head.key)
+		c.delete(c.head.key)
 	}
-	c.Delete(key)
+	c.delete(key)
 	node := &cacheNode[K, V]{
 		key:   key,
 		value: value,
 	}
 	c.insert(node)
-	c.mu.Unlock()
 }
 
-func (c *LRUCache[K, V]) Delete(key K) {
+func (c *LRUCache[K, V]) delete(key K) {
 	node, ok := c.cacheMap[key]
 	if !ok {
 		return
@@ -89,6 +89,12 @@ func (c *LRUCache[K, V]) Delete(key K) {
 	node.next.prev = node.prev
 	node.next = nil
 	node.prev = nil
+}
+
+func (c *LRUCache[K, V]) Delete(key K) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.delete(key)
 }
 
 func (c *LRUCache[K, V]) insert(node *cacheNode[K, V]) {
