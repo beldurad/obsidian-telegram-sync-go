@@ -49,13 +49,11 @@ func (h *GetTemplateHandler) Register(b *bot.Bot, m ...bot.Middleware) {
 	b.AddHandlerForState(StateGetTemplate, h, m...)
 }
 
-func (h *GetTemplateHandler) Handle(ctx context.Context, u bot.Update) (bot.Response, error) {
-	chatSession := ctx.Value(bot.ChatSessionKey).(bot.ChatSession)
-
+func (h *GetTemplateHandler) Handle(ctx context.Context, s bot.ChatSession, u bot.Update) (bot.Response, error) {
 	var payload pagePayload
 
-	if chatSession.State != bot.DefaultChatState {
-		raw := chatSession.Payload
+	if s.State != bot.DefaultChatState {
+		raw := s.Payload
 		err := json.Unmarshal([]byte(raw), &payload)
 		if err != nil {
 			return bot.Response{}, err
@@ -70,7 +68,7 @@ func (h *GetTemplateHandler) Handle(ctx context.Context, u bot.Update) (bot.Resp
 
 	templatesPage, err := h.getter.TemplatesPage(
 		ctx,
-		chatSession.ChatID,
+		s.ChatID,
 		payload.PageNum,
 		domain.DefaultPageSize,
 	)
@@ -114,12 +112,12 @@ func (h *GetTemplateHandler) Handle(ctx context.Context, u bot.Update) (bot.Resp
 
 	var c tgbotapi.Chattable
 
-	if chatSession.State == bot.DefaultChatState || chatSession.LastBotMessageID == 0 {
-		msgCfg := tgbotapi.NewMessage(chatSession.ChatID, string(textBuilder))
+	if s.State == bot.DefaultChatState || s.LastBotMessageID == 0 {
+		msgCfg := tgbotapi.NewMessage(s.ChatID, string(textBuilder))
 		msgCfg.ReplyMarkup = replyMarkup
 		c = msgCfg
 	} else {
-		msgCfg := tgbotapi.NewEditMessageCaption(chatSession.ChatID, chatSession.LastBotMessageID, string(textBuilder))
+		msgCfg := tgbotapi.NewEditMessageCaption(s.ChatID, s.LastBotMessageID, string(textBuilder))
 		msgCfg.ReplyMarkup = &replyMarkup
 		c = msgCfg
 	}
@@ -192,11 +190,10 @@ func (a *TemplateAddHandler) Register(b *bot.Bot, m ...bot.Middleware) {
 	b.AddHandlerForState(StateWaitTemplateName, a, m...)
 }
 
-func (a *TemplateAddHandler) Handle(ctx context.Context, u bot.Update) (bot.Response, error) {
-	chatSession := ctx.Value(bot.ChatSessionKey).(bot.ChatSession)
-	chatID := chatSession.ChatID
-	state := chatSession.State
-	payload := chatSession.Payload
+func (a *TemplateAddHandler) Handle(ctx context.Context, s bot.ChatSession, u bot.Update) (bot.Response, error) {
+	chatID := s.ChatID
+	state := s.State
+	payload := s.Payload
 
 	if state == StateWaitTemplateValue {
 		return a.handleValue(chatID, u.Text, payload)

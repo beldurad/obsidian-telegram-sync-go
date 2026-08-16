@@ -63,16 +63,14 @@ func TestGetAliasesHandler_Handle_FirstPage(t *testing.T) {
 		State:  bot.DefaultChatState,
 	}
 
-	ctx := context.WithValue(
-		context.Background(),
-		bot.ChatSessionKey,
-		session,
-	)
+	ctx := context.Background()
 
-	resp, err := h.Handle(ctx, bot.Update{
-		ChatID: 123,
-		Text:   "/alias",
-	})
+	resp, err := h.Handle(ctx,
+		session,
+		bot.Update{
+			ChatID: 123,
+			Text:   "/alias",
+		})
 
 	require.NoError(t, err)
 
@@ -117,16 +115,14 @@ func TestGetAliasesHandler_Handle_FirstPage_SendsNewMessage(t *testing.T) {
 		State:  bot.DefaultChatState,
 	}
 
-	ctx := context.WithValue(
-		context.Background(),
-		bot.ChatSessionKey,
-		session,
-	)
+	ctx := context.Background()
 
-	resp, err := h.Handle(ctx, bot.Update{
-		ChatID: 123,
-		Text:   "/alias",
-	})
+	resp, err := h.Handle(ctx,
+		session,
+		bot.Update{
+			ChatID: 123,
+			Text:   "/alias",
+		})
 
 	require.NoError(t, err)
 
@@ -156,16 +152,14 @@ func TestGetAliasesHandler_Handle_NextPage(t *testing.T) {
 		Payload:          rawPayload,
 	}
 
-	ctx := context.WithValue(
-		context.Background(),
-		bot.ChatSessionKey,
-		session,
-	)
+	ctx := context.Background()
 
-	resp, err := h.Handle(ctx, bot.Update{
-		ChatID: 123,
-		Text:   NextPageCommand,
-	})
+	resp, err := h.Handle(ctx,
+		session,
+		bot.Update{
+			ChatID: 123,
+			Text:   NextPageCommand,
+		})
 
 	require.NoError(t, err)
 
@@ -195,16 +189,14 @@ func TestGetAliasesHandler_Handle_PrevPage_DoesNotGoBelowZero(t *testing.T) {
 		Payload: rawPayload,
 	}
 
-	ctx := context.WithValue(
-		context.Background(),
-		bot.ChatSessionKey,
-		session,
-	)
+	ctx := context.Background()
 
-	_, err = h.Handle(ctx, bot.Update{
-		ChatID: 123,
-		Text:   PrevPageCommand,
-	})
+	_, err = h.Handle(ctx,
+		session,
+		bot.Update{
+			ChatID: 123,
+			Text:   PrevPageCommand,
+		})
 
 	require.NoError(t, err)
 	require.Equal(t, 0, getter.pageNum)
@@ -220,16 +212,14 @@ func TestGetAliasesHandler_Handle_InvalidPayload(t *testing.T) {
 		Payload: []byte(`not-json`),
 	}
 
-	ctx := context.WithValue(
-		context.Background(),
-		bot.ChatSessionKey,
-		session,
-	)
+	ctx := context.Background()
 
-	_, err := h.Handle(ctx, bot.Update{
-		ChatID: 123,
-		Text:   NextPageCommand,
-	})
+	_, err := h.Handle(ctx,
+		session,
+		bot.Update{
+			ChatID: 123,
+			Text:   NextPageCommand,
+		})
 
 	require.Error(t, err)
 	require.False(t, getter.called)
@@ -249,16 +239,14 @@ func TestGetAliasesHandler_Handle_GetterError(t *testing.T) {
 		State:  bot.DefaultChatState,
 	}
 
-	ctx := context.WithValue(
-		context.Background(),
-		bot.ChatSessionKey,
-		session,
-	)
+	ctx := context.Background()
 
-	_, err := h.Handle(ctx, bot.Update{
-		ChatID: 123,
-		Text:   string(CommandGetAliases),
-	})
+	_, err := h.Handle(ctx,
+		session,
+		bot.Update{
+			ChatID: 123,
+			Text:   string(CommandGetAliases),
+		})
 
 	require.ErrorIs(t, err, expectedErr)
 }
@@ -328,18 +316,16 @@ func TestGetAliasesHandler_Handle_PaginationButtons(t *testing.T) {
 				Payload: rawPayload,
 			}
 
-			ctx := context.WithValue(
-				context.Background(),
-				bot.ChatSessionKey,
-				session,
-			)
+			ctx := context.Background()
 
 			h := NewGetAliasesHandler(getter)
 
-			resp, err := h.Handle(ctx, bot.Update{
-				ChatID: session.ChatID,
-				Text:   tt.command,
-			})
+			resp, err := h.Handle(ctx,
+				session,
+				bot.Update{
+					ChatID: session.ChatID,
+					Text:   tt.command,
+				})
 			require.NoError(t, err)
 
 			keyboard := extractInlineKeyboard(resp.Message).InlineKeyboard
@@ -561,18 +547,17 @@ func TestAddAliasHandler_Handle_DefaultState(t *testing.T) {
 		&aliasSaverMock{},
 	)
 
-	ctx := context.WithValue(
-		context.Background(),
-		bot.ChatSessionKey,
+	ctx := context.Background()
+
+	resp, err := h.Handle(ctx,
 		bot.ChatSession{
 			ChatID: 123,
 			State:  bot.DefaultChatState,
+		},
+		bot.Update{
+			ChatID: 123,
+			Text:   "foo",
 		})
-
-	resp, err := h.Handle(ctx, bot.Update{
-		ChatID: 123,
-		Text:   "foo",
-	})
 
 	require.NoError(t, err)
 
@@ -617,19 +602,18 @@ func TestAddAliasHandler_Handle_WaitPath_UsesPayload(t *testing.T) {
 	raw, err := json.Marshal(payload)
 	require.NoError(t, err)
 
-	ctx := context.WithValue(
-		context.Background(),
-		bot.ChatSessionKey,
+	ctx := context.Background()
+
+	resp, err := h.Handle(ctx,
 		bot.ChatSession{
 			ChatID:  123,
 			State:   StateWaitPath,
 			Payload: raw,
+		},
+		bot.Update{
+			ChatID: 123,
+			Text:   "bar",
 		})
-
-	resp, err := h.Handle(ctx, bot.Update{
-		ChatID: 123,
-		Text:   "bar",
-	})
 
 	require.NoError(t, err)
 
@@ -676,11 +660,8 @@ func TestAddAliasHandler_Handle_SelectCurrentDirectory(t *testing.T) {
 	}
 
 	resp, err := h.Handle(
-		context.WithValue(
-			context.Background(),
-			bot.ChatSessionKey,
-			session,
-		),
+		context.Background(),
+		session,
 		bot.Update{
 			ChatID: 123,
 			Text:   string(currentDirCommand),
@@ -742,15 +723,13 @@ func TestAddAliasHandler_HandlePathSet_FileSelected(t *testing.T) {
 	require.NoError(t, err)
 
 	resp, err := h.Handle(
-		context.WithValue(
-			context.Background(),
-			bot.ChatSessionKey,
-			bot.ChatSession{
-				ChatID:           123,
-				State:            StateWaitPath,
-				LastBotMessageID: 456,
-				Payload:          raw,
-			}),
+		context.Background(),
+		bot.ChatSession{
+			ChatID:           123,
+			State:            StateWaitPath,
+			LastBotMessageID: 456,
+			Payload:          raw,
+		},
 		bot.Update{
 			ChatID: 123,
 			Text:   "bar.txt",

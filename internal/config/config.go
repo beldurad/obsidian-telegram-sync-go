@@ -3,7 +3,8 @@ package config
 import (
 	"log"
 	"os"
-	"strconv"
+
+	"github.com/ilyakaznacheev/cleanenv"
 )
 
 type Config struct {
@@ -11,6 +12,7 @@ type Config struct {
 	TelegramConfig `yaml:"telegram"`
 	GithubConfig   `yaml:"github"`
 	ServerConfig   `yaml:"server"`
+	TLSConfig      `yaml:"tls"`
 	SecretsDir     string `yaml:"secrets_dir"`
 }
 
@@ -38,6 +40,11 @@ type ServerConfig struct {
 	Addr string `yaml:"addr"`
 }
 
+type TLSConfig struct {
+	CertFile string `yaml:"cert_file"`
+	KeyFile  string `yaml:"key_file"`
+}
+
 func getenv(key string) string {
 	v := os.Getenv(key)
 	if v == "" {
@@ -48,46 +55,20 @@ func getenv(key string) string {
 }
 
 func MustLoad() Config {
-	dbHost := getenv("DB_HOST")
-	dbPort, err := strconv.Atoi(getenv("DB_PORT"))
-	if err != nil {
-		log.Fatal("DB_PORT is not int")
-	}
-	dbUser := getenv("DB_USER")
-	dbPass := getenv("DB_PASS")
-	sqlFilepath := getenv("INIT_SQL_FILEPATH")
-	dbCfg := DatabaseConfig{
-		Host:            dbHost,
-		Port:            uint16(dbPort),
-		User:            dbUser,
-		Password:        dbPass,
-		InitSqlFilepath: sqlFilepath,
+	configPath := os.Getenv("CONFIG_PATH")
+	if configPath == "" {
+		log.Fatal("CONFIG_PATH is not set")
 	}
 
-	githubRedirect := getenv("GITHUB_REDIRECT")
-	githubScopes := getenv("GITHUB_SCOPES")
-	githubID := getenv("GITHUB_ID")
-	githubSecret := getenv("GITHUB_SECRET")
-
-	githubCfg := GithubConfig{
-		RedirectURL:  githubRedirect,
-		Scopes:       githubScopes,
-		ClientID:     githubID,
-		ClientSecret: githubSecret,
+	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		log.Fatalf("config file does not exist: %s", configPath)
 	}
 
-	tgCfg := TelegramConfig{
-		Token: getenv("TG_TOKEN"),
+	var cfg Config
+
+	if err := cleanenv.ReadConfig(configPath, &cfg); err != nil {
+		log.Fatalf("cannot read config: %s", configPath)
 	}
 
-	serverCfg := ServerConfig{
-		Addr: getenv("HTTP_ADDR"),
-	}
-
-	return Config{
-		DatabaseConfig: dbCfg,
-		GithubConfig:   githubCfg,
-		TelegramConfig: tgCfg,
-		ServerConfig:   serverCfg,
-	}
+	return cfg
 }

@@ -171,14 +171,6 @@ func noteAddHandlerForTest(
 	)
 }
 
-func noteSessionCtx(session bot.ChatSession) context.Context {
-	return context.WithValue(
-		context.Background(),
-		bot.ChatSessionKey,
-		session,
-	)
-}
-
 func TestNoteAddPayload_ToNote(t *testing.T) {
 	payload := noteAddPayload{
 		Path:     "/notes/inbox",
@@ -211,10 +203,11 @@ func TestNoteAddHandler_Handle_DefaultState(t *testing.T) {
 	)
 
 	resp, err := h.Handle(
-		noteSessionCtx(bot.ChatSession{
+		context.Background(),
+		bot.ChatSession{
 			ChatID: 123,
 			State:  bot.DefaultChatState,
-		}),
+		},
 		bot.Update{
 			ChatID: 123,
 			Text:   CommandAddNote,
@@ -261,10 +254,11 @@ func TestNoteAddHandler_Handle_DefaultState_NextButton(t *testing.T) {
 	)
 
 	resp, err := h.Handle(
-		noteSessionCtx(bot.ChatSession{
+		context.Background(),
+		bot.ChatSession{
 			ChatID: 123,
 			State:  bot.DefaultChatState,
-		}),
+		},
 		bot.Update{
 			ChatID: 123,
 			Text:   CommandAddNote,
@@ -312,7 +306,8 @@ func TestNoteAddHandler_Handle_NextPage(t *testing.T) {
 	}
 
 	resp, err := h.Handle(
-		noteSessionCtx(session),
+		context.Background(),
+		session,
 		bot.Update{
 			ChatID: 123,
 			Raw: tgbotapi.Update{
@@ -360,7 +355,8 @@ func TestNoteAddHandler_Handle_PrevPage(t *testing.T) {
 	}
 
 	resp, err := h.Handle(
-		noteSessionCtx(session),
+		context.Background(),
+		session,
 		bot.Update{
 			ChatID: 123,
 			Raw: tgbotapi.Update{
@@ -416,7 +412,8 @@ func TestNoteAddHandler_Handle_SelectAlias(t *testing.T) {
 	}
 
 	resp, err := h.Handle(
-		noteSessionCtx(session),
+		context.Background(),
+		session,
 		bot.Update{
 			ChatID: 123,
 			Raw: tgbotapi.Update{
@@ -485,7 +482,8 @@ func TestNoteAddHandler_Handle_UnknownState_SelectsAlias(t *testing.T) {
 	}
 
 	resp, err := h.Handle(
-		noteSessionCtx(session),
+		context.Background(),
+		session,
 		bot.Update{
 			ChatID: 123,
 			Raw: tgbotapi.Update{
@@ -522,7 +520,8 @@ func TestNoteAddHandler_Handle_InvalidPayload(t *testing.T) {
 	}
 
 	resp, err := h.Handle(
-		noteSessionCtx(session),
+		context.Background(),
+		session,
 		bot.Update{
 			ChatID: 123,
 			Raw: tgbotapi.Update{
@@ -564,7 +563,8 @@ func TestNoteAddHandler_Handle_SelectAlias_AliasError(t *testing.T) {
 	}
 
 	resp, err := h.Handle(
-		noteSessionCtx(session),
+		context.Background(),
+		session,
 		bot.Update{
 			ChatID: 123,
 			Raw: tgbotapi.Update{
@@ -607,7 +607,8 @@ func TestNoteAddHandler_Handle_SelectAlias_TemplatesError(t *testing.T) {
 	}
 
 	resp, err := h.Handle(
-		noteSessionCtx(session),
+		context.Background(),
+		session,
 		bot.Update{
 			ChatID: 123,
 			Raw: tgbotapi.Update{
@@ -637,10 +638,11 @@ func TestNoteAddHandler_Handle_AliasPageError(t *testing.T) {
 	)
 
 	resp, err := h.Handle(
-		noteSessionCtx(bot.ChatSession{
+		context.Background(),
+		bot.ChatSession{
 			ChatID: 123,
 			State:  bot.DefaultChatState,
-		}),
+		},
 		bot.Update{
 			ChatID: 123,
 			Text:   CommandAddNote,
@@ -688,7 +690,8 @@ func TestNoteAddHandler_Handle_SelectTemplate(t *testing.T) {
 	}
 
 	resp, err := h.Handle(
-		noteSessionCtx(session),
+		context.Background(),
+		session,
 		bot.Update{
 			ChatID: 123,
 			Raw: tgbotapi.Update{
@@ -751,7 +754,8 @@ func TestNoteAddHandler_Handle_Template_NextPage(t *testing.T) {
 	}
 
 	resp, err := h.Handle(
-		noteSessionCtx(session),
+		context.Background(),
+		session,
 		bot.Update{
 			ChatID: 123,
 			Raw: tgbotapi.Update{
@@ -795,7 +799,8 @@ func TestNoteAddHandler_Handle_Template_InvalidPayload(t *testing.T) {
 	}
 
 	resp, err := h.Handle(
-		noteSessionCtx(session),
+		context.Background(),
+		session,
 		bot.Update{
 			ChatID: 123,
 			Raw: tgbotapi.Update{
@@ -837,7 +842,8 @@ func TestNoteAddHandler_Handle_Template_TemplateError(t *testing.T) {
 	}
 
 	resp, err := h.Handle(
-		noteSessionCtx(session),
+		context.Background(),
+		session,
 		bot.Update{
 			ChatID: 123,
 			Raw: tgbotapi.Update{
@@ -887,7 +893,8 @@ func TestNoteAddHandler_Handle_Text_ExistingFile(t *testing.T) {
 	}
 
 	resp, err := h.Handle(
-		noteSessionCtx(session),
+		context.Background(),
+		session,
 		bot.Update{
 			ChatID: 123,
 			Text:   "content",
@@ -948,7 +955,8 @@ func TestNoteAddHandler_Handle_Text_FileNotFound(t *testing.T) {
 	}
 
 	resp, err := h.Handle(
-		noteSessionCtx(session),
+		context.Background(),
+		session,
 		bot.Update{
 			ChatID: 123,
 			Text:   "content",
@@ -1004,7 +1012,8 @@ func TestNoteAddHandler_Handle_Text_NotFileType(t *testing.T) {
 	}
 
 	resp, err := h.Handle(
-		noteSessionCtx(session),
+		context.Background(),
+		session,
 		bot.Update{
 			ChatID: 123,
 			Text:   "content",
@@ -1041,7 +1050,8 @@ func TestNoteAddHandler_Handle_Text_ClientError(t *testing.T) {
 	}
 
 	resp, err := h.Handle(
-		noteSessionCtx(session),
+		context.Background(),
+		session,
 		bot.Update{
 			ChatID: 123,
 			Text:   "content",
@@ -1074,7 +1084,8 @@ func TestNoteAddHandler_Handle_Text_VaultError(t *testing.T) {
 	}
 
 	resp, err := h.Handle(
-		noteSessionCtx(session),
+		context.Background(),
+		session,
 		bot.Update{
 			ChatID: 123,
 			Text:   "content",
@@ -1122,7 +1133,8 @@ func TestNoteAddHandler_Handle_Text_SaveNoteError(t *testing.T) {
 	}
 
 	resp, err := h.Handle(
-		noteSessionCtx(session),
+		context.Background(),
+		session,
 		bot.Update{
 			ChatID: 123,
 			Text:   "content",
@@ -1163,7 +1175,8 @@ func TestNoteAddHandler_Handle_Filename(t *testing.T) {
 	}
 
 	resp, err := h.Handle(
-		noteSessionCtx(session),
+		context.Background(),
+		session,
 		bot.Update{
 			ChatID: 123,
 			Text:   "new.md",
@@ -1213,7 +1226,8 @@ func TestNoteAddHandler_Handle_Filename_NoTrailingSlash(t *testing.T) {
 	}
 
 	_, err = h.Handle(
-		noteSessionCtx(session),
+		context.Background(),
+		session,
 		bot.Update{
 			ChatID: 123,
 			Text:   "new.md",
@@ -1246,7 +1260,8 @@ func TestNoteAddHandler_Handle_Filename_Root(t *testing.T) {
 	}
 
 	_, err = h.Handle(
-		noteSessionCtx(session),
+		context.Background(),
+		session,
 		bot.Update{
 			ChatID: 123,
 			Text:   "new.md",
@@ -1274,7 +1289,8 @@ func TestNoteAddHandler_Handle_Filename_InvalidPayload(t *testing.T) {
 	}
 
 	resp, err := h.Handle(
-		noteSessionCtx(session),
+		context.Background(),
+		session,
 		bot.Update{
 			ChatID: 123,
 			Text:   "new.md",
@@ -1318,7 +1334,8 @@ func TestNoteAddHandler_Handle_Filename_SaveNoteError(t *testing.T) {
 	}
 
 	resp, err := h.Handle(
-		noteSessionCtx(session),
+		context.Background(),
+		session,
 		bot.Update{
 			ChatID: 123,
 			Text:   "new.md",

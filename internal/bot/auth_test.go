@@ -46,16 +46,6 @@ func (m *authServiceMock) GenerateAuthURL(
 	return m.authURL, m.authURLErr
 }
 
-func authContext(chatID int64) context.Context {
-	return context.WithValue(
-		context.Background(),
-		bot.ChatSessionKey,
-		bot.ChatSession{
-			ChatID: chatID,
-		},
-	)
-}
-
 func TestAuthHandler_Handle_Authenticated(t *testing.T) {
 	authService := &authServiceMock{
 		client: &mock.RemoteStorage{},
@@ -64,7 +54,10 @@ func TestAuthHandler_Handle_Authenticated(t *testing.T) {
 	handler := NewAuthHandler(authService)
 
 	resp, err := handler.Handle(
-		authContext(123),
+		context.Background(),
+		bot.ChatSession{
+			ChatID: 123,
+		},
 		bot.Update{
 			ChatID: 123,
 			Text:   "/start",
@@ -93,7 +86,10 @@ func TestAuthHandler_Handle_NotAuthenticated(t *testing.T) {
 	handler := NewAuthHandler(authService)
 
 	resp, err := handler.Handle(
-		authContext(123),
+		context.Background(),
+		bot.ChatSession{
+			ChatID: 123,
+		},
 		bot.Update{
 			ChatID: 123,
 			Text:   "/start",
@@ -130,7 +126,10 @@ func TestAuthHandler_Handle_GenerateAuthURLError(t *testing.T) {
 	handler := NewAuthHandler(authService)
 
 	resp, err := handler.Handle(
-		authContext(123),
+		context.Background(),
+		bot.ChatSession{
+			ChatID: 123,
+		},
 		bot.Update{
 			ChatID: 123,
 			Text:   "/start",

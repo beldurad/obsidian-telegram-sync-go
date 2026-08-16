@@ -54,13 +54,12 @@ func (h *GetAliasesHandler) Register(b *bot.Bot, m ...bot.Middleware) {
 	b.AddHandlerForState(StateGetAlias, h, m...)
 }
 
-func (h *GetAliasesHandler) Handle(ctx context.Context, u bot.Update) (bot.Response, error) {
-	session := ctx.Value(bot.ChatSessionKey).(bot.ChatSession)
+func (h *GetAliasesHandler) Handle(ctx context.Context, s bot.ChatSession, u bot.Update) (bot.Response, error) {
 
 	payload := pagePayload{}
 
-	if session.State != bot.DefaultChatState {
-		raw := session.Payload
+	if s.State != bot.DefaultChatState {
+		raw := s.Payload
 		err := json.Unmarshal([]byte(raw), &payload)
 		if err != nil {
 			return bot.Response{}, err
@@ -75,7 +74,7 @@ func (h *GetAliasesHandler) Handle(ctx context.Context, u bot.Update) (bot.Respo
 
 	aliasesPage, err := h.getter.AliasPage(
 		ctx,
-		session.ChatID,
+		s.ChatID,
 		payload.PageNum,
 		domain.DefaultPageSize,
 	)
@@ -120,12 +119,12 @@ func (h *GetAliasesHandler) Handle(ctx context.Context, u bot.Update) (bot.Respo
 
 	var c tgbotapi.Chattable
 
-	if session.State == bot.DefaultChatState || session.LastBotMessageID == 0 {
-		msgCfg := tgbotapi.NewMessage(session.ChatID, string(textBuilder))
+	if s.State == bot.DefaultChatState || s.LastBotMessageID == 0 {
+		msgCfg := tgbotapi.NewMessage(s.ChatID, string(textBuilder))
 		msgCfg.ReplyMarkup = replyMarkup
 		c = msgCfg
 	} else {
-		msgCfg := tgbotapi.NewEditMessageCaption(session.ChatID, session.LastBotMessageID, string(textBuilder))
+		msgCfg := tgbotapi.NewEditMessageCaption(s.ChatID, s.LastBotMessageID, string(textBuilder))
 		msgCfg.ReplyMarkup = &replyMarkup
 		c = msgCfg
 	}
@@ -187,14 +186,13 @@ func (a *AddAliasHandler) Register(b *bot.Bot, m ...bot.Middleware) {
 	b.AddHandlerForState(StateWaitAlias, a, m...)
 }
 
-func (a *AddAliasHandler) Handle(ctx context.Context, u bot.Update) (bot.Response, error) {
-	session := ctx.Value(bot.ChatSessionKey).(bot.ChatSession)
+func (a *AddAliasHandler) Handle(ctx context.Context, s bot.ChatSession, u bot.Update) (bot.Response, error) {
 
-	switch session.State {
+	switch s.State {
 	case bot.DefaultChatState, StateWaitPath:
-		return a.handlePathSet(ctx, u, session)
+		return a.handlePathSet(ctx, u, s)
 	case StateWaitAlias:
-		return a.handleAliasSet(ctx, u, session)
+		return a.handleAliasSet(ctx, u, s)
 	}
 
 	return bot.Response{}, ErrCantHandle

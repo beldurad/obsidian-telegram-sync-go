@@ -38,14 +38,12 @@ func (h *AuthHandler) Register(b *bot.Bot, m ...bot.Middleware) {
 	b.AddHandlerForCommand(CommandStart, h, m...)
 }
 
-func (h *AuthHandler) Handle(ctx context.Context, u bot.Update) (bot.Response, error) {
-	chatSession := ctx.Value(bot.ChatSessionKey).(bot.ChatSession)
-
-	_, err := h.authService.Client(ctx, chatSession.ChatID)
+func (h *AuthHandler) Handle(ctx context.Context, s bot.ChatSession, u bot.Update) (bot.Response, error) {
+	_, err := h.authService.Client(ctx, s.ChatID)
 	if err != nil {
-		return h.startAuth(ctx, chatSession)
+		return h.startAuth(ctx, s)
 	}
-	return h.menu(chatSession)
+	return h.menu(s)
 }
 
 func (h *AuthHandler) startAuth(ctx context.Context, chatSession bot.ChatSession) (bot.Response, error) {

@@ -77,20 +77,18 @@ func (a *AddNoteHandler) Register(b *bot.Bot, m ...bot.Middleware) {
 	b.AddHandlerForState(StateNoteWaitFilename, a)
 }
 
-func (a *AddNoteHandler) Handle(ctx context.Context, u bot.Update) (bot.Response, error) {
-	session := ctx.Value(bot.ChatSessionKey).(bot.ChatSession)
-
-	switch session.State {
+func (a *AddNoteHandler) Handle(ctx context.Context, s bot.ChatSession, u bot.Update) (bot.Response, error) {
+	switch s.State {
 	case bot.DefaultChatState, StateNoteWaitAlias:
-		return a.handleWaitAlias(ctx, session, u)
+		return a.handleWaitAlias(ctx, s, u)
 	case StateNoteWaitTemplate:
-		return a.handleWaitTemplate(ctx, session, u)
+		return a.handleWaitTemplate(ctx, s, u)
 	case StateNoteWaitText:
-		return a.handleWaitText(ctx, session, u)
+		return a.handleWaitText(ctx, s, u)
 	case StateNoteWaitFilename:
-		return a.handleWaitFilename(ctx, session, u)
+		return a.handleWaitFilename(ctx, s, u)
 	default:
-		return a.handleWaitAlias(ctx, session, u)
+		return a.handleWaitAlias(ctx, s, u)
 	}
 }
 

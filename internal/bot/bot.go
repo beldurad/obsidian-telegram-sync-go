@@ -1,17 +1,17 @@
 package bot
 
 import (
-	"log"
+	"log/slog"
 
 	"github.com/beldurad/obsidian-telegram-sync-go/foundation/bot"
 	"github.com/beldurad/obsidian-telegram-sync-go/foundation/telegram"
 	"github.com/beldurad/obsidian-telegram-sync-go/internal/config"
 )
 
-func Init(cfg config.TelegramConfig, sessionService bot.ChatSessionService) *bot.Bot {
+func Init(cfg config.TelegramConfig, sessionService bot.ChatSessionService, log *slog.Logger) *bot.Bot {
 	client, err := telegram.New(cfg.Token)
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
-	return bot.New(sessionService, client)
+	return bot.New(sessionService, client, log)
 }

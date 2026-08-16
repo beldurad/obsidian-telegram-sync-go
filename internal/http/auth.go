@@ -2,6 +2,7 @@ package http
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 )
 
@@ -13,11 +14,13 @@ type AuthService interface {
 
 type AuthHandler struct {
 	service AuthService
+	log     *slog.Logger
 }
 
-func NewAuthHandler(service AuthService) *AuthHandler {
+func NewAuthHandler(service AuthService, log *slog.Logger) *AuthHandler {
 	return &AuthHandler{
 		service: service,
+		log:     log,
 	}
 }
 
@@ -35,6 +38,7 @@ func (a *AuthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	err := a.service.CompleteAuth(ctx, code, state)
 
 	if err != nil {
+		a.log.Error("error while handling http request", "error", err)
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte("Ошибка при завершении авторизации"))
 	}

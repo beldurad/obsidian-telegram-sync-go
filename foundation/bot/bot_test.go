@@ -3,6 +3,7 @@ package bot_test
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"sync"
 	"testing"
 	"time"
@@ -46,26 +47,36 @@ func (m *telegramMock) Send(c tgbotapi.Chattable) (tgbotapi.Message, error) {
 	}, nil
 }
 
-type sessionMock struct {
-	session *bot.ChatSession
+func (m *telegramMock) Sent() []tgbotapi.Chattable {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
-	updated *bot.ChatSession
+	return m.sent
 }
 
-func (m *sessionMock) SessionByChatID(chatID int64) (*bot.ChatSession, error) {
+type sessionMock struct {
+	session bot.ChatSession
+
+	updated chan bot.ChatSession
+}
+
+func (m *sessionMock) SessionByChatID(chatID int64) (bot.ChatSession, error) {
 	return m.session, nil
 }
 
 func (m *sessionMock) UpdateSession(
 	chatID int64,
-	new *bot.ChatSession,
+	new bot.ChatSession,
 ) error {
-	m.updated = new
+	select {
+	case m.updated <- new:
+	default:
+	}
 	return nil
 }
 
 type handlerMock struct {
-	called bool
+	called chan struct{}
 
 	update bot.Update
 
@@ -74,11 +85,16 @@ type handlerMock struct {
 
 func (h *handlerMock) Handle(
 	ctx context.Context,
+	s bot.ChatSession,
 	u bot.Update,
 ) (bot.Response, error) {
 
-	h.called = true
 	h.update = u
+
+	select {
+	case h.called <- struct{}{}:
+	default:
+	}
 
 	resp := h.response
 
@@ -92,6 +108,32 @@ func (h *handlerMock) Handle(
 	}
 
 	return resp, nil
+}
+
+func newHandlerMock() *handlerMock {
+	return &handlerMock{
+		called: make(chan struct{}, 1),
+	}
+}
+
+func waitSignal(t *testing.T, ch <-chan struct{}) {
+	t.Helper()
+
+	select {
+	case <-ch:
+	case <-time.After(1 * time.Second):
+		t.Fatal("expected signal was not received")
+	}
+}
+
+func assertNotSignaled(t *testing.T, ch <-chan struct{}) {
+	t.Helper()
+
+	select {
+	case <-ch:
+		t.Fatal("unexpected signal received")
+	default:
+	}
 }
 
 func runBot(
@@ -117,14 +159,14 @@ func TestBot_CommandHandler(t *testing.T) {
 	tg := newTelegramMock()
 
 	session := &sessionMock{
-		session: &bot.ChatSession{
+		session: bot.ChatSession{
 			ChatID: 123,
 		},
 	}
 
-	b := bot.New(session, tg)
+	b := bot.New(session, tg, slog.Default())
 
-	handler := &handlerMock{}
+	handler := newHandlerMock()
 
 	b.AddHandlerForCommand(
 		"/start",
@@ -142,7 +184,7 @@ func TestBot_CommandHandler(t *testing.T) {
 
 	runBot(b, tg.updates, update)
 
-	assert.True(t, handler.called)
+	waitSignal(t, handler.called)
 	assert.Equal(t, int64(123), handler.update.ChatID)
 }
 
@@ -153,15 +195,15 @@ func TestBot_StateHandler(t *testing.T) {
 	testState := bot.ChatState("waiting_name")
 
 	session := &sessionMock{
-		session: &bot.ChatSession{
+		session: bot.ChatSession{
 			ChatID: 123,
 			State:  testState,
 		},
 	}
 
-	b := bot.New(session, tg)
+	b := bot.New(session, tg, slog.Default())
 
-	handler := &handlerMock{}
+	handler := newHandlerMock()
 
 	b.AddHandlerForState(
 		testState,
@@ -179,7 +221,7 @@ func TestBot_StateHandler(t *testing.T) {
 
 	runBot(b, tg.updates, update)
 
-	assert.True(t, handler.called)
+	waitSignal(t, handler.called)
 	assert.Equal(t, "Alex", handler.update.Text)
 }
 
@@ -188,17 +230,17 @@ func TestBot_BothHandlerHasPriority(t *testing.T) {
 	tg := newTelegramMock()
 
 	session := &sessionMock{
-		session: &bot.ChatSession{
+		session: bot.ChatSession{
 			ChatID: 123,
 			State:  "register",
 		},
 	}
 
-	b := bot.New(session, tg)
+	b := bot.New(session, tg, slog.Default())
 
-	commandHandler := &handlerMock{}
-	stateHandler := &handlerMock{}
-	bothHandler := &handlerMock{}
+	commandHandler := newHandlerMock()
+	stateHandler := newHandlerMock()
+	bothHandler := newHandlerMock()
 
 	b.AddHandlerForCommand(
 		"/start",
@@ -227,10 +269,10 @@ func TestBot_BothHandlerHasPriority(t *testing.T) {
 
 	runBot(b, tg.updates, update)
 
-	assert.True(t, bothHandler.called)
+	waitSignal(t, bothHandler.called)
 
-	assert.False(t, commandHandler.called)
-	assert.False(t, stateHandler.called)
+	assertNotSignaled(t, commandHandler.called)
+	assertNotSignaled(t, stateHandler.called)
 }
 
 func TestBot_StateFallbackWhenBothMissing(t *testing.T) {
@@ -238,15 +280,15 @@ func TestBot_StateFallbackWhenBothMissing(t *testing.T) {
 	tg := newTelegramMock()
 
 	session := &sessionMock{
-		session: &bot.ChatSession{
+		session: bot.ChatSession{
 			ChatID: 123,
 			State:  "register",
 		},
 	}
 
-	b := bot.New(session, tg)
+	b := bot.New(session, tg, slog.Default())
 
-	stateHandler := &handlerMock{}
+	stateHandler := newHandlerMock()
 
 	b.AddHandlerForState(
 		"register",
@@ -264,7 +306,7 @@ func TestBot_StateFallbackWhenBothMissing(t *testing.T) {
 
 	runBot(b, tg.updates, update)
 
-	assert.True(t, stateHandler.called)
+	waitSignal(t, stateHandler.called)
 }
 
 func TestBot_SessionChangesAfterHandle(t *testing.T) {
@@ -276,23 +318,23 @@ func TestBot_SessionChangesAfterHandle(t *testing.T) {
 	tg.msgID = 200
 
 	session := &sessionMock{
-		session: &bot.ChatSession{
+		session: bot.ChatSession{
 			ChatID:           123,
 			State:            bot.DefaultChatState,
 			LastBotMessageID: 456,
 		},
+		updated: make(chan bot.ChatSession, 1),
 	}
 
-	b := bot.New(session, tg)
+	b := bot.New(session, tg, slog.Default())
 
-	handler := &handlerMock{
-		response: bot.Response{
-			Message: tgbotapi.NewMessage(
-				123,
-				"ok",
-			),
-			NewChatState: &newState,
-		},
+	handler := newHandlerMock()
+	handler.response = bot.Response{
+		Message: tgbotapi.NewMessage(
+			123,
+			"ok",
+		),
+		NewChatState: &newState,
 	}
 
 	b.AddHandlerForCommand(
@@ -311,26 +353,34 @@ func TestBot_SessionChangesAfterHandle(t *testing.T) {
 
 	runBot(b, tg.updates, update)
 
-	assert.Equal(
-		t,
-		bot.ChatSession{
-			ChatID:           123,
-			State:            newState,
-			LastBotMessageID: tg.msgID,
-		},
-		*session.updated,
-	)
+	select {
+	case updated := <-session.updated:
+		assert.Equal(
+			t,
+			bot.ChatSession{
+				ChatID:           123,
+				State:            newState,
+				LastBotMessageID: tg.msgID,
+			},
+			updated,
+		)
+	case <-time.After(1 * time.Second):
+		t.Fatal("session was not updated")
+	}
 }
 
 type errorHandlerMock struct {
 	matched bool
-	called  bool
+	called  chan struct{}
 
 	response bot.Response
 }
 
 func (h *errorHandlerMock) Handle(context.Context, bot.Update, error) bot.Response {
-	h.called = true
+	select {
+	case h.called <- struct{}{}:
+	default:
+	}
 
 	return h.response
 }
@@ -346,6 +396,7 @@ type failingHandler struct {
 
 func (h *failingHandler) Handle(
 	ctx context.Context,
+	s bot.ChatSession,
 	u bot.Update,
 ) (bot.Response, error) {
 
@@ -358,14 +409,14 @@ type failingSessionService struct {
 
 func (s *failingSessionService) SessionByChatID(
 	chatID int64,
-) (*bot.ChatSession, error) {
+) (bot.ChatSession, error) {
 
-	return nil, s.err
+	return bot.NewChatSession(chatID), s.err
 }
 
 func (s *failingSessionService) UpdateSession(
 	chatID int64,
-	new *bot.ChatSession,
+	new bot.ChatSession,
 ) error {
 	return nil
 }
@@ -379,6 +430,7 @@ func TestBot_SessionError(t *testing.T) {
 			err: errors.New("db error"),
 		},
 		tg,
+		slog.Default(),
 	)
 
 	update := tgbotapi.Update{
@@ -392,9 +444,9 @@ func TestBot_SessionError(t *testing.T) {
 
 	runBot(b, tg.updates, update)
 
-	require.Len(t, tg.sent, 1)
+	require.Len(t, tg.Sent(), 1)
 
-	msgCfg, ok := tg.sent[0].(tgbotapi.MessageConfig)
+	msgCfg, ok := tg.Sent()[0].(tgbotapi.MessageConfig)
 	require.True(t, ok)
 
 	assert.Equal(
@@ -409,16 +461,17 @@ func TestBot_ErrorHandlerCalled(t *testing.T) {
 	tg := newTelegramMock()
 
 	session := &sessionMock{
-		session: &bot.ChatSession{
+		session: bot.ChatSession{
 			ChatID: 123,
 		},
 	}
 
-	b := bot.New(session, tg)
+	b := bot.New(session, tg, slog.Default())
 
 	expectedText := "custom error"
 
 	eh := &errorHandlerMock{
+		called: make(chan struct{}, 1),
 		response: bot.Response{
 			Message: tgbotapi.NewMessage(
 				123,
@@ -447,11 +500,11 @@ func TestBot_ErrorHandlerCalled(t *testing.T) {
 
 	runBot(b, tg.updates, update)
 
-	assert.True(t, eh.called)
+	waitSignal(t, eh.called)
 
-	require.Len(t, tg.sent, 1)
+	require.Len(t, tg.Sent(), 1)
 
-	msgCfg := tg.sent[0].(tgbotapi.MessageConfig)
+	msgCfg := tg.Sent()[0].(tgbotapi.MessageConfig)
 
 	assert.Equal(
 		t,
@@ -475,12 +528,12 @@ func TestBot_DefaultErrorHandler(t *testing.T) {
 	tg := newTelegramMock()
 
 	session := &sessionMock{
-		session: &bot.ChatSession{
+		session: bot.ChatSession{
 			ChatID: 123,
 		},
 	}
 
-	b := bot.New(session, tg)
+	b := bot.New(session, tg, slog.Default())
 
 	b.AddErrorHandler(
 		&neverMatchErrorHandler{},
@@ -504,9 +557,9 @@ func TestBot_DefaultErrorHandler(t *testing.T) {
 
 	runBot(b, tg.updates, update)
 
-	require.Len(t, tg.sent, 1)
+	require.Len(t, tg.Sent(), 1)
 
-	msgCfg := tg.sent[0].(tgbotapi.MessageConfig)
+	msgCfg := tg.Sent()[0].(tgbotapi.MessageConfig)
 
 	assert.Equal(
 		t,
@@ -535,6 +588,7 @@ type stateChangingHandler struct{}
 
 func (h *stateChangingHandler) Handle(
 	ctx context.Context,
+	s bot.ChatSession,
 	u bot.Update,
 ) (bot.Response, error) {
 
@@ -550,21 +604,21 @@ func (h *stateChangingHandler) Handle(
 }
 
 type trackingSessionMock struct {
-	session *bot.ChatSession
+	session bot.ChatSession
 
 	updateCalled bool
 }
 
 func (m *trackingSessionMock) SessionByChatID(
 	chatID int64,
-) (*bot.ChatSession, error) {
+) (bot.ChatSession, error) {
 
 	return m.session, nil
 }
 
 func (m *trackingSessionMock) UpdateSession(
 	chatID int64,
-	new *bot.ChatSession,
+	new bot.ChatSession,
 ) error {
 
 	m.updateCalled = true
@@ -578,12 +632,12 @@ func TestBot_SendErrorDoesNotSaveState(t *testing.T) {
 	}
 
 	session := &trackingSessionMock{
-		session: &bot.ChatSession{
+		session: bot.ChatSession{
 			ChatID: 123,
 		},
 	}
 
-	b := bot.New(session, tg)
+	b := bot.New(session, tg, slog.Default())
 
 	b.AddHandlerForCommand(
 		"/start",
@@ -615,7 +669,7 @@ type concurrentHandler struct {
 	maxHandling int
 }
 
-func (c *concurrentHandler) Handle(ctx context.Context, u bot.Update) (bot.Response, error) {
+func (c *concurrentHandler) Handle(ctx context.Context, s bot.ChatSession, u bot.Update) (bot.Response, error) {
 
 	c.mu.Lock()
 	c.currentHandling++
@@ -639,17 +693,24 @@ func (c *concurrentHandler) Handle(ctx context.Context, u bot.Update) (bot.Respo
 
 }
 
+func (c *concurrentHandler) MaxHandling() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	return c.maxHandling
+}
+
 func TestBot_ChatsCanBeHandledByOnlyOneHandlerAtATime(t *testing.T) {
 
 	tg := newTelegramMock()
 
 	session := &sessionMock{
-		session: &bot.ChatSession{
+		session: bot.ChatSession{
 			ChatID: 123,
 		},
 	}
 
-	b := bot.New(session, tg)
+	b := bot.New(session, tg, slog.Default())
 
 	handler := &concurrentHandler{}
 
@@ -669,5 +730,5 @@ func TestBot_ChatsCanBeHandledByOnlyOneHandlerAtATime(t *testing.T) {
 
 	runBot(b, tg.updates, update, update)
 
-	assert.Equal(t, 1, handler.maxHandling)
+	assert.Equal(t, 1, handler.MaxHandling())
 }

@@ -18,6 +18,6 @@ WORKDIR /app
 
 COPY --from=builder /out/server ./server
 
-EXPOSE 8090
+EXPOSE 443
 
 CMD ["./server"]

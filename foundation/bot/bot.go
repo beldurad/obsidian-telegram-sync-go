@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"sync"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -65,25 +66,25 @@ type ChatSession struct {
 	Payload          json.RawMessage
 }
 
-func NewChatSession(chatID int64) *ChatSession {
-	return &ChatSession{
+func NewChatSession(chatID int64) ChatSession {
+	return ChatSession{
 		ChatID: chatID,
 	}
 }
 
 type ChatSessionService interface {
-	SessionByChatID(chatID int64) (*ChatSession, error)
-	UpdateSession(chatID int64, new *ChatSession) error
+	SessionByChatID(chatID int64) (ChatSession, error)
+	UpdateSession(chatID int64, new ChatSession) error
 }
 
 type Handler interface {
-	Handle(context.Context, Update) (Response, error)
+	Handle(context.Context, ChatSession, Update) (Response, error)
 }
 
-type HandlerFunc func(context.Context, Update) (Response, error)
+type HandlerFunc func(context.Context, ChatSession, Update) (Response, error)
 
-func (f HandlerFunc) Handle(ctx context.Context, u Update) (Response, error) {
-	return f(ctx, u)
+func (f HandlerFunc) Handle(ctx context.Context, s ChatSession, u Update) (Response, error) {
+	return f(ctx, s, u)
 }
 
 type Middleware func(next Handler) Handler
@@ -101,7 +102,7 @@ type ErrorHandler interface {
 	Handle(context.Context, Update, error) Response
 }
 
-func defaultErrorHandle(chatID int64) Response {
+func defaultErrorHandle(chatID int64, err error) Response {
 	return Response{
 		Message: tgbotapi.NewMessage(chatID, ErrUnknown.Error()),
 	}
@@ -113,7 +114,7 @@ func (b *Bot) errHandle(ctx context.Context, u Update, err error) Response {
 			return h.Handle(ctx, u, err)
 		}
 	}
-	return defaultErrorHandle(u.ChatID)
+	return defaultErrorHandle(u.ChatID, err)
 }
 
 type TelegramBotClient interface {
@@ -146,9 +147,11 @@ type Bot struct {
 	byBoth    map[handlerResolveKey]Handler
 
 	globalMiddlewares []Middleware
+
+	log *slog.Logger
 }
 
-func New(sessionService ChatSessionService, botClient TelegramBotClient, opts ...option) *Bot {
+func New(sessionService ChatSessionService, botClient TelegramBotClient, log *slog.Logger, opts ...option) *Bot {
 	bot := &Bot{
 		workerPoolSize:    defaultWorkerPoolSize,
 		tgBot:             botClient,
@@ -158,6 +161,7 @@ func New(sessionService ChatSessionService, botClient TelegramBotClient, opts ..
 		byCommand:         make(map[Command]Handler),
 		byBoth:            make(map[handlerResolveKey]Handler),
 		globalMiddlewares: make([]Middleware, 0),
+		log:               log,
 	}
 	for _, opt := range opts {
 		opt(bot)
@@ -209,6 +213,9 @@ func (b *Bot) AddErrorHandler(h ErrorHandler) {
 }
 
 func (b *Bot) handle(ctx context.Context, u tgbotapi.Update) {
+	log := b.log.With("chat_id", u.FromChat().ID, "msg_id", u.UpdateID)
+
+	log.Debug("new update", "tg_update", u)
 
 	var resp Response
 
@@ -218,20 +225,27 @@ func (b *Bot) handle(ctx context.Context, u tgbotapi.Update) {
 	}
 	update := extractUpdate(u)
 	if update.Text == "" {
+		log.Debug("empty text")
 		return
 	}
 	session, err := b.sessionService.SessionByChatID(chat.ID)
 
 	if err != nil {
+		err := fmt.Errorf("%w:%w", ErrInternalServer, err)
+		log.Debug("error while getting session", "error", err)
 		resp = Response{
 			Message: tgbotapi.NewMessage(chat.ID, ErrInternalServer.Error()),
 		}
-		b.tgBot.Send(resp.Message)
+		_, err = b.tgBot.Send(resp.Message)
+		if err != nil {
+			log.Error("error while sending error message", "error", err)
+		}
 		return
 	}
 
 	handler := b.resolveHandler(Command(update.Text), session.State)
 	if handler == nil {
+		log.Debug("no suitable handler found")
 		return
 	}
 	for i := len(b.globalMiddlewares) - 1; i >= 0; i-- {
@@ -239,8 +253,9 @@ func (b *Bot) handle(ctx context.Context, u tgbotapi.Update) {
 	}
 
 	ctx = context.WithValue(ctx, ChatSessionKey, session)
-	resp, err = handler.Handle(ctx, update)
+	resp, err = handler.Handle(ctx, session, update)
 	if err != nil {
+		log.Debug("handler error", "error", err)
 		resp = b.errHandle(ctx, update, err)
 	}
 
@@ -248,6 +263,7 @@ func (b *Bot) handle(ctx context.Context, u tgbotapi.Update) {
 
 	// If an error occurs while sending a response, the program does not save the new session state.
 	if err != nil {
+		log.Error("error while sending message", "error", err)
 		return
 	}
 
@@ -256,7 +272,10 @@ func (b *Bot) handle(ctx context.Context, u tgbotapi.Update) {
 		session.State = *resp.NewChatState
 	}
 	session.Payload = resp.NewPayload
-	b.sessionService.UpdateSession(chat.ID, session)
+	err = b.sessionService.UpdateSession(chat.ID, session)
+	if err != nil {
+		log.Error("error while updating session", "error", err)
+	}
 }
 
 type chatLock struct {
@@ -297,6 +316,7 @@ func (c *chatLocks) lock(chatID int64) (unlock func()) {
 }
 
 func (b *Bot) StartListening(ctx context.Context) {
+	b.log.Info("bot starting listening")
 	if b.sessionService == nil {
 		panic("Bot needs ChatSessionService - a service to retrieve and save the chat session state")
 	}
@@ -320,6 +340,7 @@ func (b *Bot) StartListening(ctx context.Context) {
 				case <-done:
 					return
 				case u, ok := <-workerChans[i]:
+					b.log.Debug("update from chan get")
 					if !ok {
 						return
 					}
@@ -328,8 +349,11 @@ func (b *Bot) StartListening(ctx context.Context) {
 						continue
 					}
 					unlock := locks.lock(chat.ID)
+					b.log.Debug("locked")
 					b.handle(ctx, u)
+					b.log.Debug("unlocked")
 					unlock()
+
 				}
 			}
 		}()

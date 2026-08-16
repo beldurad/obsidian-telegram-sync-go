@@ -39,39 +39,3 @@ jobs:
           name: obstg
           path: obstg
 
-  deploy:
-    needs: test
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Download binary
-        uses: actions/download-artifact@v4
-        with:
-          name: obstg
-
-      - name: Configure SSH
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-
-          ssh-keyscan -H "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/known_hosts
-
-      - name: Deploy
-        env:
-          HOST: ${{ secrets.DEPLOY_HOST }}
-          USER: ${{ secrets.DEPLOY_USER }}
-          SHA: ${{ github.sha }}
-        run: |
-          ssh -i ~/.ssh/deploy_key "$USER@$HOST" \
-            "mkdir -p /opt/obstg/releases/$SHA"
-
-          scp -i ~/.ssh/deploy_key \
-            obstg \
-            "$USER@$HOST:/opt/obstg/releases/$SHA/obstg"
-
-          ssh -i ~/.ssh/deploy_key "$USER@$HOST" "
-            chmod +x /opt/obstg/releases/$SHA/obstg &&
-            ln -sfn /opt/obstg/releases/$SHA /opt/obstg/bin &&
-            sudo systemctl restart obstg
-          "

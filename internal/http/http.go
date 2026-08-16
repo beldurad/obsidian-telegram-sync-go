@@ -2,24 +2,27 @@ package http
 
 import (
 	"errors"
-	"log"
+	"log/slog"
 	"net/http"
 
 	"github.com/beldurad/obsidian-telegram-sync-go/internal/config"
 )
 
-func StartServer(cfg config.ServerConfig, authService AuthService) *http.Server {
+func StartServer(cfg config.Config, authService AuthService, log *slog.Logger) *http.Server {
 	mux := http.NewServeMux()
-	authHandler := NewAuthHandler(authService)
+	authHandler := NewAuthHandler(authService, log)
 	mux.Handle(CallbackEndpoint, authHandler)
 	server := http.Server{
 		Addr:    cfg.Addr,
 		Handler: mux,
 	}
 	go func() {
-		err := server.ListenAndServe()
+		err := server.ListenAndServeTLS(
+			cfg.CertFile,
+			cfg.KeyFile,
+		)
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Fatal(err)
+			panic(err)
 		}
 	}()
 	return &server

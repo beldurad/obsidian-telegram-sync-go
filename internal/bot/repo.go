@@ -53,10 +53,9 @@ func (h *RepoSetHandler) Register(b *bot.Bot, m ...bot.Middleware) {
 	b.AddHandlerForState(RepoSetState, h)
 }
 
-func (h *RepoSetHandler) Handle(ctx context.Context, u bot.Update) (bot.Response, error) {
-	session := ctx.Value(bot.ChatSessionKey).(bot.ChatSession)
-	chatID := session.ChatID
-	state := session.State
+func (h *RepoSetHandler) Handle(ctx context.Context, s bot.ChatSession, u bot.Update) (bot.Response, error) {
+	chatID := s.ChatID
+	state := s.State
 
 	client, err := h.clientGetter.Client(ctx, chatID)
 	if err != nil {
@@ -70,12 +69,12 @@ func (h *RepoSetHandler) Handle(ctx context.Context, u bot.Update) (bot.Response
 	if state == RepoSetState &&
 		!slices.Contains(RepoSetCommands, u.Raw.CallbackData()) {
 		log.Println("repo chosen")
-		return h.handleChosenRepo(ctx, session, client, u.Raw.CallbackData(), user.Username)
+		return h.handleChosenRepo(ctx, s, client, u.Raw.CallbackData(), user.Username)
 	}
 
 	var payload pagePayload
-	if session.State != bot.DefaultChatState {
-		raw := session.Payload
+	if s.State != bot.DefaultChatState {
+		raw := s.Payload
 		err := json.Unmarshal([]byte(raw), &payload)
 		if err != nil {
 			log.Printf("error while unmarshalling: %v", err)
@@ -117,12 +116,12 @@ func (h *RepoSetHandler) Handle(ctx context.Context, u bot.Update) (bot.Response
 
 	var c tgbotapi.Chattable
 
-	if session.State == bot.DefaultChatState || session.LastBotMessageID == 0 {
+	if s.State == bot.DefaultChatState || s.LastBotMessageID == 0 {
 		msgCfg := tgbotapi.NewMessage(chatID, "Выберите репозиторий хранилища")
 		msgCfg.ReplyMarkup = markup
 		c = msgCfg
 	} else {
-		msgCfg := tgbotapi.NewEditMessageCaption(session.ChatID, session.LastBotMessageID, "Выберите репозиторий хранилища")
+		msgCfg := tgbotapi.NewEditMessageCaption(s.ChatID, s.LastBotMessageID, "Выберите репозиторий хранилища")
 		msgCfg.ReplyMarkup = &markup
 		c = msgCfg
 	}
@@ -177,7 +176,7 @@ func (h *RepoSetHandler) handleChosenRepo(ctx context.Context, session bot.ChatS
 
 func (h *RepoSetHandler) RepoSetMiddleware() bot.Middleware {
 	return bot.Middleware(func(next bot.Handler) bot.Handler {
-		return bot.HandlerFunc(func(ctx context.Context, u bot.Update) (bot.Response, error) {
+		return bot.HandlerFunc(func(ctx context.Context, s bot.ChatSession, u bot.Update) (bot.Response, error) {
 			exists, err := h.vaultService.ExistsByChatID(ctx, u.ChatID)
 			if err != nil {
 				return bot.Response{}, err
@@ -187,7 +186,7 @@ func (h *RepoSetHandler) RepoSetMiddleware() bot.Middleware {
 					Message: tgbotapi.NewMessage(u.ChatID, "Установите репозиторий в котором находится ваще хранилище через /set-repo"),
 				}, nil
 			}
-			return next.Handle(ctx, u)
+			return next.Handle(ctx, s, u)
 		})
 	})
 }

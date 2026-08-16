@@ -71,11 +71,8 @@ func TestRepoSetHandler_Handle_ClientError(t *testing.T) {
 	}
 
 	resp, err := handler.Handle(
-		context.WithValue(
-			context.Background(),
-			bot.ChatSessionKey,
-			session,
-		),
+		context.Background(),
+		session,
 		bot.Update{},
 	)
 
@@ -103,13 +100,10 @@ func TestRepoSetHandler_Handle_UserInfoError(t *testing.T) {
 	)
 
 	resp, err := handler.Handle(
-		context.WithValue(
-			context.Background(),
-			bot.ChatSessionKey,
-			bot.ChatSession{
-				ChatID: 123,
-			},
-		),
+		context.Background(),
+		bot.ChatSession{
+			ChatID: 123,
+		},
 		bot.Update{},
 	)
 
@@ -147,14 +141,11 @@ func TestRepoSetHandler_Handle_DefaultState(t *testing.T) {
 	)
 
 	resp, err := handler.Handle(
-		context.WithValue(
-			context.Background(),
-			bot.ChatSessionKey,
-			bot.ChatSession{
-				ChatID: 123,
-				State:  bot.DefaultChatState,
-			},
-		),
+		context.Background(),
+		bot.ChatSession{
+			ChatID: 123,
+			State:  bot.DefaultChatState,
+		},
 		bot.Update{},
 	)
 
@@ -206,15 +197,12 @@ func TestRepoSetHandler_Handle_NextPage(t *testing.T) {
 	require.NoError(t, err)
 
 	resp, err := handler.Handle(
-		context.WithValue(
-			context.Background(),
-			bot.ChatSessionKey,
-			bot.ChatSession{
-				ChatID:  123,
-				State:   RepoSetState,
-				Payload: raw,
-			},
-		),
+		context.Background(),
+		bot.ChatSession{
+			ChatID:  123,
+			State:   RepoSetState,
+			Payload: raw,
+		},
 		bot.Update{
 			Raw: tgbotapi.Update{
 				CallbackQuery: &tgbotapi.CallbackQuery{
@@ -259,15 +247,12 @@ func TestRepoSetHandler_Handle_PrevPage(t *testing.T) {
 	require.NoError(t, err)
 
 	resp, err := handler.Handle(
-		context.WithValue(
-			context.Background(),
-			bot.ChatSessionKey,
-			bot.ChatSession{
-				ChatID:  123,
-				State:   RepoSetState,
-				Payload: raw,
-			},
-		),
+		context.Background(),
+		bot.ChatSession{
+			ChatID:  123,
+			State:   RepoSetState,
+			Payload: raw,
+		},
 		bot.Update{
 			Raw: tgbotapi.Update{
 				CallbackQuery: &tgbotapi.CallbackQuery{
@@ -320,14 +305,11 @@ func TestRepoSetHandler_Handle_ChosenRepo_Success(t *testing.T) {
 		LastBotMessageID: 456,
 	}
 
-	ctx := context.WithValue(
-		context.Background(),
-		bot.ChatSessionKey,
-		session,
-	)
+	ctx := context.Background()
 
 	resp, err := handler.Handle(
 		ctx,
+		session,
 		bot.Update{
 			ChatID: 123,
 			Raw: tgbotapi.Update{
@@ -385,14 +367,12 @@ func TestRepoSetHandler_Handle_ChosenRepo_NotFound(t *testing.T) {
 	)
 
 	resp, err := handler.Handle(
-		context.WithValue(
-			context.Background(),
-			bot.ChatSessionKey,
-			bot.ChatSession{
-				ChatID:           123,
-				State:            RepoSetState,
-				LastBotMessageID: 456,
-			}),
+		context.Background(),
+		bot.ChatSession{
+			ChatID:           123,
+			State:            RepoSetState,
+			LastBotMessageID: 456,
+		},
 		bot.Update{
 			Raw: tgbotapi.Update{
 				CallbackQuery: &tgbotapi.CallbackQuery{
@@ -441,14 +421,12 @@ func TestRepoSetHandler_Handle_ChosenRepo_RepoExistsError(t *testing.T) {
 	)
 
 	resp, err := handler.Handle(
-		context.WithValue(
-			context.Background(),
-			bot.ChatSessionKey,
-			bot.ChatSession{
-				ChatID:           123,
-				State:            RepoSetState,
-				LastBotMessageID: 456,
-			}),
+		context.Background(),
+		bot.ChatSession{
+			ChatID:           123,
+			State:            RepoSetState,
+			LastBotMessageID: 456,
+		},
 		bot.Update{
 			Raw: tgbotapi.Update{
 				CallbackQuery: &tgbotapi.CallbackQuery{
@@ -490,14 +468,12 @@ func TestRepoSetHandler_Handle_ChosenRepo_SaveError(t *testing.T) {
 	)
 
 	resp, err := handler.Handle(
-		context.WithValue(
-			context.Background(),
-			bot.ChatSessionKey,
-			bot.ChatSession{
-				ChatID:           123,
-				State:            RepoSetState,
-				LastBotMessageID: 456,
-			}),
+		context.Background(),
+		bot.ChatSession{
+			ChatID:           123,
+			State:            RepoSetState,
+			LastBotMessageID: 456,
+		},
 		bot.Update{
 			Raw: tgbotapi.Update{
 				CallbackQuery: &tgbotapi.CallbackQuery{
@@ -539,8 +515,8 @@ func TestRepoSetMiddleware_Exists(t *testing.T) {
 
 	nextCalled := false
 
-	next := handlerFunc(
-		func(ctx context.Context, u bot.Update) (bot.Response, error) {
+	next := bot.HandlerFunc(
+		func(ctx context.Context, s bot.ChatSession, u bot.Update) (bot.Response, error) {
 			nextCalled = true
 
 			return bot.Response{
@@ -554,6 +530,9 @@ func TestRepoSetMiddleware_Exists(t *testing.T) {
 
 	resp, err := wrapped.Handle(
 		context.Background(),
+		bot.ChatSession{
+			ChatID: 123,
+		},
 		bot.Update{
 			ChatID: 123,
 		},
@@ -585,8 +564,8 @@ func TestRepoSetMiddleware_NotExists(t *testing.T) {
 
 	nextCalled := false
 
-	next := handlerFunc(
-		func(ctx context.Context, u bot.Update) (bot.Response, error) {
+	next := bot.HandlerFunc(
+		func(ctx context.Context, s bot.ChatSession, u bot.Update) (bot.Response, error) {
 			nextCalled = true
 			return bot.Response{}, nil
 		},
@@ -596,6 +575,9 @@ func TestRepoSetMiddleware_NotExists(t *testing.T) {
 
 	resp, err := wrapped.Handle(
 		context.Background(),
+		bot.ChatSession{
+			ChatID: 123,
+		},
 		bot.Update{
 			ChatID: 123,
 		},

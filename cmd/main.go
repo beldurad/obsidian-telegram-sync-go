@@ -57,7 +57,11 @@ func main() {
 
 	sessionService := cache.NewChatSessionService()
 
-	b := bot.Init(cfg.TelegramConfig, sessionService)
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+		Level: slog.LevelDebug,
+	}))
+
+	b := bot.Init(cfg.TelegramConfig, sessionService, logger)
 
 	aliasGetHandler.Register(b)
 	aliasAddHandler.Register(b)
@@ -70,7 +74,7 @@ func main() {
 	logMiddleware := bot.NewLogMiddleware(slog.Default())
 	b.Use(logMiddleware.Middleware())
 
-	server := http.StartServer(cfg.ServerConfig, oauthService)
+	server := http.StartServer(cfg, oauthService, logger)
 
 	sigCtx, cancel := signal.NotifyContext(
 		context.Background(),
