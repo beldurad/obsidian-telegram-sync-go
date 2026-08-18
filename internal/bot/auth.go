@@ -15,7 +15,7 @@ const StateWaitingRepo = "WAITING_REPO"
 
 // ===== COMMANDS =====
 
-var CommandStart = bot.Command("/start")
+var CommandConnectGithub = bot.Command("/connect_github")
 
 // ===== AUTH =====
 
@@ -28,52 +28,48 @@ type AuthHandler struct {
 	authService AuthService
 }
 
+var _ bot.Handler = &AuthHandler{}
+
 func NewAuthHandler(authService AuthService) *AuthHandler {
 	return &AuthHandler{
 		authService: authService,
 	}
 }
 
-func (h *AuthHandler) Register(b *bot.Bot, m ...bot.Middleware) {
-	b.AddHandlerForCommand(CommandStart, h, m...)
+func (h *AuthHandler) Match(ctx context.Context, s *bot.ChatSession, u bot.Update) bool {
+	return u.Text == string(CommandConnectGithub)
 }
 
-func (h *AuthHandler) Handle(ctx context.Context, s bot.ChatSession, u bot.Update) (bot.Response, error) {
-	_, err := h.authService.Client(ctx, s.ChatID)
+func (h *AuthHandler) Handle(ctx context.Context, s *bot.ChatSession, u bot.Update) (resp bot.Response, err error) {
+	defer func() {
+		if err != nil {
+			s.ToDefault()
+		}
+	}()
+	_, err = h.authService.Client(ctx, u.ChatID)
 	if err != nil {
-		return h.startAuth(ctx, s)
+		resp, err = h.startAuth(ctx, s)
+		return
 	}
-	return h.menu(s)
+	msgCfg := tgbotapi.NewMessage(u.ChatID, "Вы уже подключены")
+	resp, err = bot.Response{
+		Message: msgCfg,
+	}, nil
+	return
 }
 
-func (h *AuthHandler) startAuth(ctx context.Context, chatSession bot.ChatSession) (bot.Response, error) {
-	url, err := h.authService.GenerateAuthURL(ctx, chatSession.ChatID)
+func (h *AuthHandler) startAuth(ctx context.Context, chatSession *bot.ChatSession) (bot.Response, error) {
+	const op = "startAuth"
+	chatID := chatSession.ChatID()
+
+	url, err := h.authService.GenerateAuthURL(ctx, chatID)
 	if err != nil {
-		return bot.Response{}, err
+		return bot.Response{}, fmt.Errorf("%v: generating auth url: %w", op, err)
 	}
 
-	msgCfg := tgbotapi.NewMessage(chatSession.ChatID, fmt.Sprintf("Перейдите по этой ссылке для Github-авторизации: %s", url))
+	msgCfg := tgbotapi.NewMessage(chatID, fmt.Sprintf("Перейдите по этой ссылке для Github-авторизации: %s", url))
 
 	return bot.Response{
 		Message: msgCfg,
 	}, nil
-}
-
-func (h *AuthHandler) menu(session bot.ChatSession) (bot.Response, error) {
-
-	msgCfg := tgbotapi.NewMessage(
-		session.ChatID,
-		`
-		/start /menu - это сообщение
-		/template - вывести свои шаблоны текстов
-		/alias - вывести все свои алиасы для файловых путей
-		/add-template - добавить новый шаблон
-		/add-alias - добавить новый алиас
-		`,
-	)
-
-	return bot.Response{
-		Message: msgCfg,
-	}, nil
-
 }

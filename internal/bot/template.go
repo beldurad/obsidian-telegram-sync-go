@@ -38,25 +38,37 @@ type GetTemplateHandler struct {
 	getter TemplateGetter
 }
 
+var _ bot.Handler = &GetTemplateHandler{}
+
 func NewGetTemplateHandler(getter TemplateGetter) *GetTemplateHandler {
 	return &GetTemplateHandler{
 		getter: getter,
 	}
 }
 
-func (h *GetTemplateHandler) Register(b *bot.Bot, m ...bot.Middleware) {
-	b.AddHandlerForCommand(CommandGetTemplates, h, m...)
-	b.AddHandlerForState(StateGetTemplate, h, m...)
+func (h *GetTemplateHandler) Match(ctx context.Context, s *bot.ChatSession, u bot.Update) bool {
+	return u.Text == CommandGetTemplates || s.State() == StateGetTemplate
 }
 
-func (h *GetTemplateHandler) Handle(ctx context.Context, s bot.ChatSession, u bot.Update) (bot.Response, error) {
+func (h *GetTemplateHandler) Handle(ctx context.Context, s *bot.ChatSession, u bot.Update) (resp bot.Response, err error) {
+	const op = "GetTemplateHandler.Handle"
+
+	defer func() {
+		if err != nil {
+			s.ToDefault()
+		}
+	}()
+
+	chatID := s.ChatID()
+	state := s.State()
+
 	var payload pagePayload
 
-	if s.State != bot.DefaultChatState {
-		raw := s.Payload
-		err := json.Unmarshal([]byte(raw), &payload)
+	if state != bot.DefaultChatState {
+		raw := s.Payload()
+		err := json.Unmarshal(raw, &payload)
 		if err != nil {
-			return bot.Response{}, err
+			return bot.Response{}, fmt.Errorf("%v: unmarshaling payload: %w", op, err)
 		}
 		switch u.Raw.CallbackData() {
 		case NextPageCommand:
@@ -68,12 +80,12 @@ func (h *GetTemplateHandler) Handle(ctx context.Context, s bot.ChatSession, u bo
 
 	templatesPage, err := h.getter.TemplatesPage(
 		ctx,
-		s.ChatID,
+		chatID,
 		payload.PageNum,
 		domain.DefaultPageSize,
 	)
 	if err != nil {
-		return bot.Response{}, err
+		return bot.Response{}, fmt.Errorf("%v: getting templates page: %w", op, err)
 	}
 
 	textBuilder := []rune("Ваши текстовые шаблоны\n")
@@ -112,26 +124,25 @@ func (h *GetTemplateHandler) Handle(ctx context.Context, s bot.ChatSession, u bo
 
 	var c tgbotapi.Chattable
 
-	if s.State == bot.DefaultChatState || s.LastBotMessageID == 0 {
-		msgCfg := tgbotapi.NewMessage(s.ChatID, string(textBuilder))
+	if state == bot.DefaultChatState || !s.EditMsgAvailable() {
+		msgCfg := tgbotapi.NewMessage(chatID, string(textBuilder))
 		msgCfg.ReplyMarkup = replyMarkup
 		c = msgCfg
 	} else {
-		msgCfg := tgbotapi.NewEditMessageCaption(s.ChatID, s.LastBotMessageID, string(textBuilder))
+		msgCfg := tgbotapi.NewEditMessageText(chatID, s.LastBotMessageID(), string(textBuilder))
 		msgCfg.ReplyMarkup = &replyMarkup
 		c = msgCfg
 	}
 
 	bytes, err := json.Marshal(payload)
 	if err != nil {
-		return bot.Response{}, err
+		resp, err = bot.Response{}, fmt.Errorf("%v: marshaling payload: %w", op, err)
+		return
 	}
 
-	return bot.Response{
-		Message:      c,
-		NewChatState: &StateGetTemplate,
-		NewPayload:   bytes,
-	}, nil
+	s.SetState(StateGetTemplate)
+	s.SetPayload(bytes)
+	return bot.Response{Message: c}, nil
 }
 
 // ===== CREATE TEMPLATE
@@ -143,6 +154,8 @@ type TemplateSaver interface {
 type TemplateAddHandler struct {
 	saver TemplateSaver
 }
+
+var _ bot.Handler = &TemplateAddHandler{}
 
 func NewTemplateAddHandler(saver TemplateSaver) *TemplateAddHandler {
 	return &TemplateAddHandler{
@@ -167,13 +180,14 @@ func newTemplateBuilder(chatID int64) templateBuilder {
 }
 
 func (p templateBuilder) toTemplate() (domain.Template, error) {
+	const op = "toTemplate"
 	id, err := uuid.Parse(p.ID)
 	if err != nil {
-		return domain.Template{}, err
+		return domain.Template{}, fmt.Errorf("%v: parsing id: %w", op, err)
 	}
 	createdAt, err := time.Parse(time.DateOnly, p.CreatedAt)
 	if err != nil {
-		return domain.Template{}, err
+		return domain.Template{}, fmt.Errorf("%v: parsing created_at: %w", op, err)
 	}
 	return domain.Template{
 		ID:        id,
@@ -184,53 +198,71 @@ func (p templateBuilder) toTemplate() (domain.Template, error) {
 	}, nil
 }
 
-func (a *TemplateAddHandler) Register(b *bot.Bot, m ...bot.Middleware) {
-	b.AddHandlerForCommand(CommandAddTemplate, a, m...)
-	b.AddHandlerForState(StateWaitTemplateValue, a, m...)
-	b.AddHandlerForState(StateWaitTemplateName, a, m...)
+func (a *TemplateAddHandler) Match(ctx context.Context, s *bot.ChatSession, u bot.Update) bool {
+	return u.Text == CommandAddTemplate ||
+		s.State() == StateWaitTemplateValue ||
+		s.State() == StateWaitTemplateName
 }
 
-func (a *TemplateAddHandler) Handle(ctx context.Context, s bot.ChatSession, u bot.Update) (bot.Response, error) {
-	chatID := s.ChatID
-	state := s.State
-	payload := s.Payload
+func (a *TemplateAddHandler) Handle(ctx context.Context, s *bot.ChatSession, u bot.Update) (resp bot.Response, err error) {
+	const op = "TemplateAddHandler.Handle"
+
+	defer func() {
+		if err != nil {
+			s.ToDefault()
+		}
+	}()
+
+	chatID := u.ChatID
+	state := s.State()
 
 	if state == StateWaitTemplateValue {
-		return a.handleValue(chatID, u.Text, payload)
+		resp, err = a.handleValue(chatID, u.Text, s)
+	} else if state == StateWaitTemplateName {
+		resp, err = a.handleName(ctx, chatID, u.Text, s)
+	} else {
+		resp, err = a.handleDefault(s, u)
 	}
-	if state == StateWaitTemplateName {
-		return a.handleName(ctx, chatID, u.Text, payload)
+
+	if err != nil {
+		err = fmt.Errorf("%v: %w", op, err)
 	}
-	return a.handleDefault(chatID)
+	return
 }
 
-func (a *TemplateAddHandler) handleDefault(chatID int64) (bot.Response, error) {
-	payload := newTemplateBuilder(chatID)
+func (a *TemplateAddHandler) handleDefault(s *bot.ChatSession, u bot.Update) (bot.Response, error) {
+	const op = "handleDefault"
+
+	payload := newTemplateBuilder(u.ChatID)
 	bytes, err := json.Marshal(payload)
 	if err != nil {
-		return bot.Response{}, err
+		return bot.Response{}, fmt.Errorf("%v: marshaling builder: %w", op, err)
 	}
+	s.SetState(StateWaitTemplateValue)
+	s.SetPayload(bytes)
 	return bot.Response{
 		Message: tgbotapi.NewMessage(
-			chatID,
+			u.ChatID,
 			"Введите шаблон, используя {} как плейсхолдер",
 		),
-		NewChatState: &StateWaitTemplateValue,
-		NewPayload:   bytes,
 	}, nil
 }
 
-func (a *TemplateAddHandler) handleValue(chatID int64, value string, rawPayload json.RawMessage) (bot.Response, error) {
+func (a *TemplateAddHandler) handleValue(chatID int64, value string, s *bot.ChatSession) (bot.Response, error) {
+	const op = "handleValue"
 	var payload templateBuilder
-	err := json.Unmarshal([]byte(rawPayload), &payload)
+	err := json.Unmarshal([]byte(s.Payload()), &payload)
 	if err != nil {
-		return bot.Response{}, err
+		return bot.Response{}, fmt.Errorf("%v: unmarshaling payload: %w", op, err)
 	}
 	payload.Value = value
 	bytes, err := json.Marshal(payload)
 	if err != nil {
-		return bot.Response{}, err
+		return bot.Response{}, fmt.Errorf("%v: marshaling builder: %w", op, err)
 	}
+
+	s.SetState(StateWaitTemplateName)
+	s.SetPayload(bytes)
 	return bot.Response{
 		Message: tgbotapi.NewMessage(
 			chatID,
@@ -238,26 +270,27 @@ func (a *TemplateAddHandler) handleValue(chatID int64, value string, rawPayload 
 			Введите название шаблона
 			`,
 		),
-		NewChatState: &StateWaitTemplateName,
-		NewPayload:   bytes,
 	}, nil
 }
 
-func (a *TemplateAddHandler) handleName(ctx context.Context, chatID int64, name string, rawPayload json.RawMessage) (bot.Response, error) {
+func (a *TemplateAddHandler) handleName(ctx context.Context, chatID int64, name string, s *bot.ChatSession) (bot.Response, error) {
+	const op = "handleName"
 	var payload templateBuilder
-	err := json.Unmarshal([]byte(rawPayload), &payload)
+	err := json.Unmarshal([]byte(s.Payload()), &payload)
 	if err != nil {
-		return bot.Response{}, err
+		return bot.Response{}, fmt.Errorf("%v: unmarshaling payload: %w", op, err)
 	}
 	payload.Name = name
 	template, err := payload.toTemplate()
 	if err != nil {
-		return bot.Response{}, err
+		return bot.Response{}, fmt.Errorf("%v: converting builder to template: %w", op, err)
 	}
 	err = a.saver.Save(ctx, template)
 	if err != nil {
-		return bot.Response{}, err
+		return bot.Response{}, fmt.Errorf("%v: saving template: %w", op, err)
 	}
+
+	s.ToDefault()
 	return bot.Response{
 		Message: tgbotapi.NewMessage(
 			chatID,

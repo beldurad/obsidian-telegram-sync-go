@@ -33,6 +33,7 @@ func NewTemplateStorage(db *sql.DB, pageNumCache TemplatePageCountCache) *Templa
 }
 
 func (s *TemplateStorage) Save(ctx context.Context, t domain.Template) (err error) {
+	const op = "TemplateStorage.Save"
 	const query = `
 	INSERT INTO template (id, chat_id, name, value)
 	VALUES
@@ -40,7 +41,7 @@ func (s *TemplateStorage) Save(ctx context.Context, t domain.Template) (err erro
 	`
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("%w:%w", domain.ErrDb, err)
+		return fmt.Errorf("%v: beginning transaction: %w: %w", op, domain.ErrDb, err)
 	}
 	defer func() {
 		if err != nil {
@@ -49,7 +50,7 @@ func (s *TemplateStorage) Save(ctx context.Context, t domain.Template) (err erro
 		}
 		err = tx.Commit()
 		if err != nil {
-			err = fmt.Errorf("%w:%w", domain.ErrDb, err)
+			err = fmt.Errorf("%v: committing transaction: %w: %w", op, domain.ErrDb, err)
 		}
 	}()
 	_, err = tx.ExecContext(
@@ -63,9 +64,9 @@ func (s *TemplateStorage) Save(ctx context.Context, t domain.Template) (err erro
 	if err != nil {
 		pqErr := new(pq.Error)
 		if errors.As(err, &pqErr) && pqErr.Code == pqerror.UniqueViolation {
-			return fmt.Errorf("%w:%w:%w", domain.ErrAlreadyExists, domain.ErrDb, err)
+			return fmt.Errorf("%v: saving template, unique violation: %w: %w: %w", op, domain.ErrAlreadyExists, domain.ErrDb, err)
 		}
-		return fmt.Errorf("%w:%w", domain.ErrDb, err)
+		return fmt.Errorf("%v: saving template: %w: %w", op, domain.ErrDb, err)
 	}
 
 	err = s.pageCountCache.Delete(ctx, t.ChatID, domain.DefaultPageSize)
@@ -76,6 +77,7 @@ func (s *TemplateStorage) Save(ctx context.Context, t domain.Template) (err erro
 }
 
 func (s *TemplateStorage) TemplatesPage(ctx context.Context, chatID int64, pageNum, pageSize int) (domain.Page[domain.Template], error) {
+	const op = "TemplateStorage.TemplatesPage"
 	if pageNum < 0 || pageSize < 0 {
 		return domain.Page[domain.Template]{}, domain.ErrBadArgument
 	}
@@ -99,7 +101,7 @@ func (s *TemplateStorage) TemplatesPage(ctx context.Context, chatID int64, pageN
 			countQuery, chatID,
 		).Scan(&count)
 		if err != nil {
-			return page, fmt.Errorf("%w:%w", domain.ErrDb, err)
+			return page, fmt.Errorf("%v: counting templates: %w: %w", op, domain.ErrDb, err)
 		}
 		page.TotalPages = int(
 			math.Ceil(
@@ -122,7 +124,7 @@ func (s *TemplateStorage) TemplatesPage(ctx context.Context, chatID int64, pageN
 	`
 	rows, err := s.db.QueryContext(ctx, query, chatID, offset, limit)
 	if err != nil {
-		return domain.Page[domain.Template]{}, fmt.Errorf("%w:%w", domain.ErrDb, err)
+		return domain.Page[domain.Template]{}, fmt.Errorf("%v: querying templates page: %w: %w", op, domain.ErrDb, err)
 	}
 	templates := make([]domain.Template, pageSize)
 	cur := 0
@@ -135,7 +137,7 @@ func (s *TemplateStorage) TemplatesPage(ctx context.Context, chatID int64, pageN
 			&templates[cur].Value,
 		)
 		if err != nil {
-			return domain.Page[domain.Template]{}, fmt.Errorf("%w:%w", domain.ErrDb, err)
+			return domain.Page[domain.Template]{}, fmt.Errorf("%v: scanning template row: %w: %w", op, domain.ErrDb, err)
 		}
 		cur++
 	}
@@ -144,9 +146,10 @@ func (s *TemplateStorage) TemplatesPage(ctx context.Context, chatID int64, pageN
 }
 
 func (s *TemplateStorage) Template(ctx context.Context, id string, chatID int64) (domain.Template, error) {
+	const op = "TemplateStorage.Template"
 	parsedID, err := uuid.Parse(id)
 	if err != nil {
-		return domain.Template{}, fmt.Errorf("%w: %w", domain.ErrBadArgument, err)
+		return domain.Template{}, fmt.Errorf("%v: parsing template id: %w: %w", op, domain.ErrBadArgument, err)
 	}
 
 	const query = `
@@ -158,7 +161,7 @@ func (s *TemplateStorage) Template(ctx context.Context, id string, chatID int64)
 	var template domain.Template
 
 	if err := s.db.QueryRowContext(ctx, query, id, chatID).Scan(&template.ChatID, &template.Name, &template.Value, &template.CreatedAt); err != nil {
-		return domain.Template{}, fmt.Errorf("%w:%w", domain.ErrDb, err)
+		return domain.Template{}, fmt.Errorf("%v: querying template: %w: %w", op, domain.ErrDb, err)
 	}
 	template.ID = parsedID
 	return template, nil

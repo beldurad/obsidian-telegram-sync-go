@@ -47,6 +47,7 @@ func main() {
 
 	oauthService := appgithub.NewOAuthService(&oauthCfg, oauthContextStorage, oauthTokenStorage)
 
+	startHandler := bot.NewStartHandler()
 	aliasGetHandler := bot.NewGetAliasesHandler(aliasStorage)
 	aliasAddHandler := bot.NewAddAliasHandler(userVaultStorage, oauthService, aliasStorage)
 	authHandler := bot.NewAuthHandler(oauthService)
@@ -62,14 +63,14 @@ func main() {
 	}))
 
 	b := bot.Init(cfg.TelegramConfig, sessionService, logger)
-
-	aliasGetHandler.Register(b)
-	aliasAddHandler.Register(b)
-	authHandler.Register(b)
-	templateGetHandler.Register(b)
-	templateAddHandler.Register(b)
-	repoHandler.Register(b)
-	noteAddHandler.Register(b)
+	b.AddHandler(startHandler)
+	b.AddHandler(aliasGetHandler)
+	b.AddHandler(aliasAddHandler)
+	b.AddHandler(authHandler)
+	b.AddHandler(repoHandler)
+	b.AddHandler(templateGetHandler)
+	b.AddHandler(templateAddHandler)
+	b.AddHandler(noteAddHandler)
 
 	logMiddleware := bot.NewLogMiddleware(slog.Default())
 	b.Use(logMiddleware.Middleware())

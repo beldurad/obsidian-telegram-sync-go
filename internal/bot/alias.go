@@ -49,20 +49,24 @@ func NewGetAliasesHandler(getter AliasesGetter) *GetAliasesHandler {
 	}
 }
 
-func (h *GetAliasesHandler) Register(b *bot.Bot, m ...bot.Middleware) {
-	b.AddHandlerForCommand(CommandGetAliases, h, m...)
-	b.AddHandlerForState(StateGetAlias, h, m...)
+var _ bot.Handler = &GetAliasesHandler{}
+
+func (h *GetAliasesHandler) Match(ctx context.Context, s *bot.ChatSession, u bot.Update) bool {
+	return u.Text == string(CommandGetAliases) ||
+		s.State() == StateGetAlias
 }
 
-func (h *GetAliasesHandler) Handle(ctx context.Context, s bot.ChatSession, u bot.Update) (bot.Response, error) {
+func (h *GetAliasesHandler) Handle(ctx context.Context, s *bot.ChatSession, u bot.Update) (bot.Response, error) {
+	const op = "GetAliasesHandler.Handle"
 
+	state := s.State()
 	payload := pagePayload{}
 
-	if s.State != bot.DefaultChatState {
-		raw := s.Payload
-		err := json.Unmarshal([]byte(raw), &payload)
+	if state != bot.DefaultChatState {
+		raw := s.Payload()
+		err := json.Unmarshal(raw, &payload)
 		if err != nil {
-			return bot.Response{}, err
+			return bot.Response{}, fmt.Errorf("%v: payload unmarshaling: %w", op, err)
 		}
 		switch u.Text {
 		case NextPageCommand:
@@ -74,12 +78,12 @@ func (h *GetAliasesHandler) Handle(ctx context.Context, s bot.ChatSession, u bot
 
 	aliasesPage, err := h.getter.AliasPage(
 		ctx,
-		s.ChatID,
+		u.ChatID,
 		payload.PageNum,
 		domain.DefaultPageSize,
 	)
 	if err != nil {
-		return bot.Response{}, err
+		return bot.Response{}, fmt.Errorf("%v: error while getting alias page %d: %w", op, payload.PageNum, err)
 	}
 
 	textBuilder := []rune("Ваши алиасы\n")
@@ -119,25 +123,25 @@ func (h *GetAliasesHandler) Handle(ctx context.Context, s bot.ChatSession, u bot
 
 	var c tgbotapi.Chattable
 
-	if s.State == bot.DefaultChatState || s.LastBotMessageID == 0 {
-		msgCfg := tgbotapi.NewMessage(s.ChatID, string(textBuilder))
+	if state == bot.DefaultChatState || s.LastBotMessageID() == 0 {
+		msgCfg := tgbotapi.NewMessage(u.ChatID, string(textBuilder))
 		msgCfg.ReplyMarkup = replyMarkup
 		c = msgCfg
 	} else {
-		msgCfg := tgbotapi.NewEditMessageCaption(s.ChatID, s.LastBotMessageID, string(textBuilder))
+		msgCfg := tgbotapi.NewEditMessageText(u.ChatID, s.LastBotMessageID(), string(textBuilder))
 		msgCfg.ReplyMarkup = &replyMarkup
 		c = msgCfg
 	}
 
 	bytes, err := json.Marshal(payload)
 	if err != nil {
-		return bot.Response{}, err
+		return bot.Response{}, fmt.Errorf("%v: marshaling response payload: %w", op, err)
 	}
 
+	s.SetState(StateGetAlias)
+	s.SetPayload(bytes)
 	return bot.Response{
-		Message:      c,
-		NewChatState: &StateGetAlias,
-		NewPayload:   bytes,
+		Message: c,
 	}, nil
 }
 
@@ -180,23 +184,36 @@ func NewAddAliasHandler(vaultGetter UserVaultGetter, clientGetter ClientGetter, 
 	}
 }
 
-func (a *AddAliasHandler) Register(b *bot.Bot, m ...bot.Middleware) {
-	b.AddHandlerForCommand(CommandAddAlias, a, m...)
-	b.AddHandlerForState(StateWaitPath, a, m...)
-	b.AddHandlerForState(StateWaitAlias, a, m...)
+var _ bot.Handler = &AddAliasHandler{}
+
+func (a *AddAliasHandler) Match(ctx context.Context, s *bot.ChatSession, u bot.Update) bool {
+	return u.Text == string(CommandAddAlias) ||
+		s.State() == StateWaitPath ||
+		s.State() == StateWaitAlias
 }
 
-func (a *AddAliasHandler) Handle(ctx context.Context, s bot.ChatSession, u bot.Update) (bot.Response, error) {
+func (a *AddAliasHandler) Handle(ctx context.Context, s *bot.ChatSession, u bot.Update) (resp bot.Response, err error) {
+	const op = "AddAliasHandler.Handle"
 
-	switch s.State {
+	defer func() {
+		if err != nil {
+			s.ToDefault()
+		}
+	}()
+
+	switch s.State() {
 	case bot.DefaultChatState, StateWaitPath:
-		return a.handlePathSet(ctx, u, s)
+		resp, err = a.handlePathSet(ctx, s, u)
 	case StateWaitAlias:
-		return a.handleAliasSet(ctx, u, s)
+		resp, err = a.handleAliasSet(ctx, s, u)
+	default:
+		resp, err = bot.Response{}, ErrCantHandle
 	}
 
-	return bot.Response{}, ErrCantHandle
-
+	if err != nil {
+		err = fmt.Errorf("%v: %w", op, err)
+	}
+	return
 }
 
 type aliasBuilder struct {
@@ -228,42 +245,44 @@ func (a aliasBuilder) toAlias() (domain.Alias, error) {
 	}, nil
 }
 
-func (a *AddAliasHandler) handlePathSet(ctx context.Context, u bot.Update, s bot.ChatSession) (bot.Response, error) {
-	client, err := a.clientGetter.Client(ctx, s.ChatID)
+func (a *AddAliasHandler) handlePathSet(ctx context.Context, s *bot.ChatSession, u bot.Update) (bot.Response, error) {
+	const op = "handlePathSet"
+	client, err := a.clientGetter.Client(ctx, u.ChatID)
 	if err != nil {
-		return bot.Response{}, err
+		return bot.Response{}, fmt.Errorf("%v: getting client: %w", op, err)
 	}
 
-	vault, err := a.vaultGetter.Vault(ctx, s.ChatID)
+	vault, err := a.vaultGetter.Vault(ctx, u.ChatID)
 	if err != nil {
-		return bot.Response{}, err
+		return bot.Response{}, fmt.Errorf("%v: getting vault: %w", op, err)
 	}
 	payload := newPathChoosingPayload()
-	if s.State != bot.DefaultChatState {
-		raw := s.Payload
-		if err := json.Unmarshal([]byte(raw), &payload); err != nil {
-			return bot.Response{}, err
+	if s.State() != bot.DefaultChatState {
+		raw := s.Payload()
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			return bot.Response{}, fmt.Errorf("%v: unmarshaling payload: %w", op, err)
 		}
 	}
 	if u.Text == string(currentDirCommand) {
-		msgCfg := tgbotapi.NewEditMessageText(s.ChatID, s.LastBotMessageID, "Введите алиас для пути")
-		builder := newAliasBuilder(s.ChatID)
+		msgCfg := tgbotapi.NewEditMessageText(u.ChatID, s.LastBotMessageID(), "Введите алиас для пути")
+		builder := newAliasBuilder(u.ChatID)
 		builder.Path = payload.CurPath
 		builder.Type = domain.TypeDir
 		bytes, err := json.Marshal(builder)
 		if err != nil {
-			return bot.Response{}, err
+			return bot.Response{}, fmt.Errorf("%v: marshaling builder: %w", op, err)
 		}
+
+		s.SetState(StateWaitAlias)
+		s.SetPayload(bytes)
 		return bot.Response{
-			Message:      msgCfg,
-			NewChatState: &StateWaitAlias,
-			NewPayload:   bytes,
+			Message: msgCfg,
 		}, nil
 	} else if u.Text != NextPageCommand && u.Text != PrevPageCommand {
 		payload.CurPath, err = url.JoinPath(payload.CurPath, u.Text)
 		payload.PageNum = 0
 		if err != nil {
-			return bot.Response{}, err
+			return bot.Response{}, fmt.Errorf("%v: joining path: %w", op, err)
 		}
 	}
 
@@ -275,25 +294,26 @@ func (a *AddAliasHandler) handlePathSet(ctx context.Context, u bot.Update, s bot
 		domain.DefaultPageSize,
 	)
 	if err != nil && errors.Is(err, domain.ErrNotDirectory) {
-		msgCfg := tgbotapi.NewEditMessageText(s.ChatID, s.LastBotMessageID, "Введите алиас для пути")
-		builder := newAliasBuilder(s.ChatID)
+		msgCfg := tgbotapi.NewEditMessageText(u.ChatID, s.LastBotMessageID(), "Введите алиас для пути")
+		builder := newAliasBuilder(u.ChatID)
 		builder.Path = payload.CurPath
 		bytes, err := json.Marshal(builder)
 		if err != nil {
-			return bot.Response{}, err
+			return bot.Response{}, fmt.Errorf("%v: marshaling builder: %w", op, err)
 		}
+
+		s.SetState(StateWaitAlias)
+		s.SetPayload(bytes)
 		return bot.Response{
-			Message:      msgCfg,
-			NewChatState: &StateWaitAlias,
-			NewPayload:   bytes,
+			Message: msgCfg,
 		}, nil
 
 	} else if err != nil {
-		return bot.Response{}, err
+		return bot.Response{}, fmt.Errorf("%v: getting directory contents: %w", op, err)
 	}
 
 	msgCfg := tgbotapi.NewMessage(
-		s.ChatID,
+		u.ChatID,
 		`
 		Выберите путь
 		(Файл, если вы хотите использовать алиас для записи в существующий файл)
@@ -304,12 +324,13 @@ func (a *AddAliasHandler) handlePathSet(ctx context.Context, u bot.Update, s bot
 	msgCfg.ReplyMarkup = pathButtons(dir, payload)
 	bytes, err := json.Marshal(payload)
 	if err != nil {
-		return bot.Response{}, err
+		return bot.Response{}, fmt.Errorf("%v: marshaling payload: %w", op, err)
 	}
+
+	s.SetState(StateWaitPath)
+	s.SetPayload(bytes)
 	return bot.Response{
-		Message:      msgCfg,
-		NewChatState: &StateWaitPath,
-		NewPayload:   bytes,
+		Message: msgCfg,
 	}, nil
 }
 
@@ -363,27 +384,26 @@ func pathButtons(dirElems domain.Page[domain.DirElem], payload pathChoosingPaylo
 	}
 }
 
-func (a *AddAliasHandler) handleAliasSet(ctx context.Context, u bot.Update, s bot.ChatSession) (bot.Response, error) {
+func (a *AddAliasHandler) handleAliasSet(ctx context.Context, s *bot.ChatSession, u bot.Update) (bot.Response, error) {
+	const op = "handleAliasSet"
 	alias := u.Text
 
 	payload := aliasBuilder{}
-	raw := s.Payload
-	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
-		return bot.Response{}, err
+	raw := s.Payload()
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return bot.Response{}, fmt.Errorf("%v: unmarshaling payload: %w", op, err)
 	}
 	payload.Alias = alias
 	aliasToSave, err := payload.toAlias()
 	if err != nil {
-		return bot.Response{}, err
+		return bot.Response{}, fmt.Errorf("%v: can't convert payload to alias: %w", op, err)
 	}
+
 	if err := a.saver.Save(ctx, aliasToSave); err != nil {
-		return bot.Response{}, err
+		return bot.Response{}, fmt.Errorf("%v: error while saving alias: %w", op, err)
 	}
-	return bot.Response{
-		Message: tgbotapi.NewMessage(
-			s.ChatID,
-			"Алиас успешно сохранен",
-		),
-		NewChatState: &bot.DefaultChatState,
-	}, nil
+
+	s.ToDefault()
+	msgCfg := tgbotapi.NewEditMessageText(u.ChatID, s.LastBotMessageID(), "Алиас успешно сохранен")
+	return bot.Response{Message: msgCfg}, nil
 }

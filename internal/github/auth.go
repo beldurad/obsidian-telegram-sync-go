@@ -2,6 +2,7 @@ package github
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/beldurad/obsidian-telegram-sync-go/internal/domain"
 	"github.com/google/uuid"
@@ -48,11 +49,12 @@ func NewOAuthService(oauthConfig *oauth2.Config, contextStorage OAuthContextStor
 }
 
 func (s *OAuthService) GenerateAuthURL(ctx context.Context, chatID int64) (string, error) {
+	const op = "OAuthService.GenerateAuthURL"
 	oauthCtx := NewOAuthContext(chatID)
 
 	err := s.contextStorage.Save(ctx, oauthCtx)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("%v: saving oauth context: %w", op, err)
 	}
 
 	return s.conf.AuthCodeURL(
@@ -63,26 +65,28 @@ func (s *OAuthService) GenerateAuthURL(ctx context.Context, chatID int64) (strin
 }
 
 func (s *OAuthService) CompleteAuth(ctx context.Context, code string, state string) error {
+	const op = "OAuthService.CompleteAuth"
 	oauthCtx, err := s.contextStorage.ContextByState(ctx, state)
 	if err != nil {
-		return err
+		return fmt.Errorf("%v: getting oauth context by state: %w", op, err)
 	}
 
 	token, err := s.conf.Exchange(ctx, code, oauth2.VerifierOption(oauthCtx.Verifier))
 	if err != nil {
-		return err
+		return fmt.Errorf("%v: exchanging code for token: %w", op, err)
 	}
 
 	if err := s.tokenStorage.Save(ctx, oauthCtx.ChatID, token); err != nil {
-		return err
+		return fmt.Errorf("%v: saving token: %w", op, err)
 	}
 	return nil
 }
 
 func (s *OAuthService) Client(ctx context.Context, chatID int64) (domain.RemoteStorage, error) {
+	const op = "OAuthService.Client"
 	token, err := s.tokenStorage.Token(ctx, chatID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%v: getting token: %w", op, err)
 	}
 
 	return &GithubClient{

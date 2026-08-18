@@ -58,10 +58,7 @@ func TestGetAliasesHandler_Handle_FirstPage(t *testing.T) {
 
 	h := NewGetAliasesHandler(getter)
 
-	session := bot.ChatSession{
-		ChatID: 123,
-		State:  bot.DefaultChatState,
-	}
+	session := bot.NewChatSession(123)
 
 	ctx := context.Background()
 
@@ -79,16 +76,17 @@ func TestGetAliasesHandler_Handle_FirstPage(t *testing.T) {
 	require.Equal(t, 0, getter.pageNum)
 	require.Equal(t, domain.DefaultPageSize, getter.pageSize)
 
-	require.NotNil(t, resp.NewChatState)
-	require.Equal(t, StateGetAlias, *resp.NewChatState)
+	require.Equal(t, StateGetAlias, session.State())
 
 	var payload pagePayload
 	require.NoError(t, json.Unmarshal(
-		[]byte(resp.NewPayload),
+		session.Payload(),
 		&payload,
 	))
 
 	require.Equal(t, 0, payload.PageNum)
+
+	_ = resp
 }
 
 func TestGetAliasesHandler_Handle_FirstPage_SendsNewMessage(t *testing.T) {
@@ -110,10 +108,7 @@ func TestGetAliasesHandler_Handle_FirstPage_SendsNewMessage(t *testing.T) {
 
 	h := NewGetAliasesHandler(getter)
 
-	session := bot.ChatSession{
-		ChatID: 123,
-		State:  bot.DefaultChatState,
-	}
+	session := bot.NewChatSession(123)
 
 	ctx := context.Background()
 
@@ -145,12 +140,9 @@ func TestGetAliasesHandler_Handle_NextPage(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	session := bot.ChatSession{
-		ChatID:           123,
-		State:            StateGetAlias,
-		LastBotMessageID: 42,
-		Payload:          rawPayload,
-	}
+	session := bot.NewChatSession(123)
+	session.SetState(StateGetAlias)
+	session.SetPayload(rawPayload)
 
 	ctx := context.Background()
 
@@ -167,11 +159,12 @@ func TestGetAliasesHandler_Handle_NextPage(t *testing.T) {
 
 	var payload pagePayload
 	require.NoError(t, json.Unmarshal(
-		[]byte(resp.NewPayload),
+		session.Payload(),
 		&payload,
 	))
 
 	require.Equal(t, 1, payload.PageNum)
+	_ = resp
 }
 
 func TestGetAliasesHandler_Handle_PrevPage_DoesNotGoBelowZero(t *testing.T) {
@@ -183,11 +176,10 @@ func TestGetAliasesHandler_Handle_PrevPage_DoesNotGoBelowZero(t *testing.T) {
 		PageNum: 0,
 	})
 	require.NoError(t, err)
-	session := bot.ChatSession{
-		ChatID:  123,
-		State:   StateGetAlias,
-		Payload: rawPayload,
-	}
+
+	session := bot.NewChatSession(123)
+	session.SetState(StateGetAlias)
+	session.SetPayload(rawPayload)
 
 	ctx := context.Background()
 
@@ -206,11 +198,9 @@ func TestGetAliasesHandler_Handle_InvalidPayload(t *testing.T) {
 	getter := &aliasesGetterMock{}
 	h := NewGetAliasesHandler(getter)
 
-	session := bot.ChatSession{
-		ChatID:  123,
-		State:   StateGetAlias,
-		Payload: []byte(`not-json`),
-	}
+	session := bot.NewChatSession(123)
+	session.SetState(StateGetAlias)
+	session.SetPayload([]byte(`not-json`))
 
 	ctx := context.Background()
 
@@ -234,10 +224,7 @@ func TestGetAliasesHandler_Handle_GetterError(t *testing.T) {
 
 	h := NewGetAliasesHandler(getter)
 
-	session := bot.ChatSession{
-		ChatID: 123,
-		State:  bot.DefaultChatState,
-	}
+	session := bot.NewChatSession(123)
 
 	ctx := context.Background()
 
@@ -310,11 +297,10 @@ func TestGetAliasesHandler_Handle_PaginationButtons(t *testing.T) {
 				PageNum: tt.prevPageNum,
 			})
 			require.NoError(t, err)
-			session := bot.ChatSession{
-				ChatID:  123,
-				State:   StateGetAlias,
-				Payload: rawPayload,
-			}
+
+			session := bot.NewChatSession(123)
+			session.SetState(StateGetAlias)
+			session.SetPayload(rawPayload)
 
 			ctx := context.Background()
 
@@ -323,7 +309,7 @@ func TestGetAliasesHandler_Handle_PaginationButtons(t *testing.T) {
 			resp, err := h.Handle(ctx,
 				session,
 				bot.Update{
-					ChatID: session.ChatID,
+					ChatID: session.ChatID(),
 					Text:   tt.command,
 				})
 			require.NoError(t, err)
@@ -549,11 +535,10 @@ func TestAddAliasHandler_Handle_DefaultState(t *testing.T) {
 
 	ctx := context.Background()
 
+	session := bot.NewChatSession(123)
+
 	resp, err := h.Handle(ctx,
-		bot.ChatSession{
-			ChatID: 123,
-			State:  bot.DefaultChatState,
-		},
+		session,
 		bot.Update{
 			ChatID: 123,
 			Text:   "foo",
@@ -571,8 +556,8 @@ func TestAddAliasHandler_Handle_DefaultState(t *testing.T) {
 	require.Equal(t, 0, client.DirectoryPage)
 	require.Equal(t, domain.DefaultPageSize, client.DirectorySize)
 
-	require.Equal(t, resp.NewChatState, &StateWaitPath)
-	require.NotEmpty(t, resp.NewPayload)
+	require.Equal(t, StateWaitPath, session.State())
+	require.NotEmpty(t, session.Payload())
 
 	_, ok := resp.Message.(tgbotapi.MessageConfig)
 	require.True(t, ok)
@@ -604,12 +589,12 @@ func TestAddAliasHandler_Handle_WaitPath_UsesPayload(t *testing.T) {
 
 	ctx := context.Background()
 
+	session := bot.NewChatSession(123)
+	session.SetState(StateWaitPath)
+	session.SetPayload(raw)
+
 	resp, err := h.Handle(ctx,
-		bot.ChatSession{
-			ChatID:  123,
-			State:   StateWaitPath,
-			Payload: raw,
-		},
+		session,
 		bot.Update{
 			ChatID: 123,
 			Text:   "bar",
@@ -623,11 +608,12 @@ func TestAddAliasHandler_Handle_WaitPath_UsesPayload(t *testing.T) {
 	var gotPayload pathChoosingPayload
 	require.NoError(
 		t,
-		json.Unmarshal([]byte(resp.NewPayload), &gotPayload),
+		json.Unmarshal(session.Payload(), &gotPayload),
 	)
 
 	require.Equal(t, "/foo/bar", gotPayload.CurPath)
 	require.Equal(t, 0, gotPayload.PageNum)
+	_ = resp
 }
 
 func TestAddAliasHandler_Handle_SelectCurrentDirectory(t *testing.T) {
@@ -652,12 +638,9 @@ func TestAddAliasHandler_Handle_SelectCurrentDirectory(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	session := bot.ChatSession{
-		ChatID:           123,
-		State:            StateWaitPath,
-		LastBotMessageID: 456,
-		Payload:          raw,
-	}
+	session := bot.NewChatSession(123)
+	session.SetState(StateWaitPath)
+	session.SetPayload(raw)
 
 	resp, err := h.Handle(
 		context.Background(),
@@ -672,13 +655,12 @@ func TestAddAliasHandler_Handle_SelectCurrentDirectory(t *testing.T) {
 
 	require.False(t, client.DirectoryCalled)
 
-	require.NotNil(t, resp.NewChatState)
-	require.Equal(t, StateWaitAlias, *resp.NewChatState)
+	require.Equal(t, StateWaitAlias, session.State())
 
 	var payload aliasBuilder
 	require.NoError(
 		t,
-		json.Unmarshal([]byte(resp.NewPayload), &payload),
+		json.Unmarshal(session.Payload(), &payload),
 	)
 
 	require.Equal(t, int64(123), payload.ChatID)
@@ -690,7 +672,6 @@ func TestAddAliasHandler_Handle_SelectCurrentDirectory(t *testing.T) {
 	require.True(t, ok)
 
 	require.Equal(t, int64(123), msg.ChatID)
-	require.Equal(t, 456, msg.MessageID)
 	require.Equal(t, "Введите алиас для пути", msg.Text)
 }
 
@@ -722,14 +703,13 @@ func TestAddAliasHandler_HandlePathSet_FileSelected(t *testing.T) {
 	})
 	require.NoError(t, err)
 
+	session := bot.NewChatSession(123)
+	session.SetState(StateWaitPath)
+	session.SetPayload(raw)
+
 	resp, err := h.Handle(
 		context.Background(),
-		bot.ChatSession{
-			ChatID:           123,
-			State:            StateWaitPath,
-			LastBotMessageID: 456,
-			Payload:          raw,
-		},
+		session,
 		bot.Update{
 			ChatID: 123,
 			Text:   "bar.txt",
@@ -740,13 +720,12 @@ func TestAddAliasHandler_HandlePathSet_FileSelected(t *testing.T) {
 
 	require.Equal(t, "/foo/bar.txt", client.DirectoryPath)
 
-	require.NotNil(t, resp.NewChatState)
-	require.Equal(t, StateWaitAlias, *resp.NewChatState)
+	require.Equal(t, StateWaitAlias, session.State())
 
 	var payload aliasBuilder
 	require.NoError(
 		t,
-		json.Unmarshal([]byte(resp.NewPayload), &payload),
+		json.Unmarshal(session.Payload(), &payload),
 	)
 
 	require.Equal(t, "/foo/bar.txt", payload.Path)
@@ -775,19 +754,17 @@ func TestAddAliasHandler_handleAliasSet_Success(t *testing.T) {
 		saver: saver,
 	}
 
-	session := bot.ChatSession{
-		ChatID:  123,
-		State:   StateWaitAlias,
-		Payload: payload,
-	}
+	session := bot.NewChatSession(123)
+	session.SetState(StateWaitAlias)
+	session.SetPayload(payload)
 
 	resp, err := handler.handleAliasSet(
 		context.Background(),
+		session,
 		bot.Update{
 			ChatID: 123,
 			Text:   "my-alias",
 		},
-		session,
 	)
 
 	require.NoError(t, err)
@@ -802,9 +779,7 @@ func TestAddAliasHandler_handleAliasSet_Success(t *testing.T) {
 
 	require.NotNil(t, resp.Message)
 
-	newState := resp.NewChatState
-	require.NotNil(t, newState)
-	require.Equal(t, bot.DefaultChatState, *newState)
+	require.Equal(t, bot.DefaultChatState, session.State())
 }
 
 func TestAddAliasHandler_handleAliasSet_InvalidPayload(t *testing.T) {
@@ -814,19 +789,17 @@ func TestAddAliasHandler_handleAliasSet_InvalidPayload(t *testing.T) {
 		saver: saver,
 	}
 
-	session := bot.ChatSession{
-		ChatID:  123,
-		State:   StateWaitAlias,
-		Payload: []byte("invalid json"),
-	}
+	session := bot.NewChatSession(123)
+	session.SetState(StateWaitAlias)
+	session.SetPayload([]byte("invalid json"))
 
 	resp, err := handler.handleAliasSet(
 		context.Background(),
+		session,
 		bot.Update{
 			ChatID: 123,
 			Text:   "my-alias",
 		},
-		session,
 	)
 
 	require.Error(t, err)
@@ -848,19 +821,17 @@ func TestAddAliasHandler_handleAliasSet_InvalidUUID(t *testing.T) {
 		saver: saver,
 	}
 
-	session := bot.ChatSession{
-		ChatID:  123,
-		State:   StateWaitAlias,
-		Payload: []byte(payload),
-	}
+	session := bot.NewChatSession(123)
+	session.SetState(StateWaitAlias)
+	session.SetPayload([]byte(payload))
 
 	resp, err := handler.handleAliasSet(
 		context.Background(),
+		session,
 		bot.Update{
 			ChatID: 123,
 			Text:   "my-alias",
 		},
-		session,
 	)
 
 	require.Error(t, err)
@@ -888,19 +859,17 @@ func TestAddAliasHandler_handleAliasSet_SaveError(t *testing.T) {
 		saver: saver,
 	}
 
-	session := bot.ChatSession{
-		ChatID:  123,
-		State:   StateWaitAlias,
-		Payload: payload,
-	}
+	session := bot.NewChatSession(123)
+	session.SetState(StateWaitAlias)
+	session.SetPayload(payload)
 
 	resp, err := handler.handleAliasSet(
 		context.Background(),
+		session,
 		bot.Update{
 			ChatID: 123,
 			Text:   "my-alias",
 		},
-		session,
 	)
 
 	require.ErrorIs(t, err, expectedErr)

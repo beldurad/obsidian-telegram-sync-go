@@ -44,6 +44,7 @@ type GithubClient struct {
 }
 
 func update(ctx context.Context, client *http.Client, r CreateRequest) (*http.Response, error) {
+	const op = "update"
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
@@ -51,12 +52,12 @@ func update(ctx context.Context, client *http.Client, r CreateRequest) (*http.Re
 
 	fullURL, err := url.JoinPath(baseURL, "repos", r.Owner, r.Repo, "contents", r.Path)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%v: building url: %w", op, err)
 	}
 
 	byteSlice, err := json.Marshal(r)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%v: marshaling request: %w", op, err)
 	}
 
 	req, err := http.NewRequestWithContext(
@@ -66,31 +67,33 @@ func update(ctx context.Context, client *http.Client, r CreateRequest) (*http.Re
 		bytes.NewReader(byteSlice),
 	)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%v: creating request: %w", op, err)
 	}
 
 	return client.Do(req)
 }
 
 func (c *GithubClient) createFile(ctx context.Context, r CreateRequest) error {
+	const op = "createFile"
 	r.Sha = ""
 	resp, err := update(ctx, c.client, r)
 	if err != nil {
-		return fmt.Errorf("%w: %w", domain.ErrClient, err)
+		return fmt.Errorf("%v: creating file: %w: %w", op, domain.ErrClient, err)
 	}
 	if resp.StatusCode != http.StatusCreated {
-		return fmt.Errorf("%w: %v", domain.ErrClient, resp.StatusCode)
+		return fmt.Errorf("%v: creating file: %w: status %v", op, domain.ErrClient, resp.StatusCode)
 	}
 	return nil
 }
 
 func (c *GithubClient) updateFile(ctx context.Context, r CreateRequest) error {
+	const op = "updateFile"
 	resp, err := update(ctx, c.client, r)
 	if err != nil {
-		return fmt.Errorf("%w: %w", domain.ErrClient, err)
+		return fmt.Errorf("%v: updating file: %w: %w", op, domain.ErrClient, err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("%w: %v", domain.ErrClient, resp.StatusCode)
+		return fmt.Errorf("%v: updating file: %w: status %v", op, domain.ErrClient, resp.StatusCode)
 	}
 	return nil
 }
@@ -110,45 +113,47 @@ const (
 )
 
 func (c *GithubClient) UserInfo() (domain.RemoteUser, error) {
+	const op = "GithubClient.UserInfo"
 	fullURL, err := url.JoinPath(baseURL, "user")
 	if err != nil {
-		return domain.RemoteUser{}, err
+		return domain.RemoteUser{}, fmt.Errorf("%v: building url: %w", op, err)
 	}
 	resp, err := c.client.Get(fullURL)
 	if err != nil {
-		return domain.RemoteUser{}, err
+		return domain.RemoteUser{}, fmt.Errorf("%v: requesting user: %w", op, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return domain.RemoteUser{}, domain.ErrClient
+		return domain.RemoteUser{}, fmt.Errorf("%v: %w: status %v", op, domain.ErrClient, resp.StatusCode)
 	}
 	decoder := json.NewDecoder(resp.Body)
 	var user GithubUser
 
 	if err := decoder.Decode(&user); err != nil {
-		return domain.RemoteUser{}, err
+		return domain.RemoteUser{}, fmt.Errorf("%v: decoding user: %w", op, err)
 	}
 	return domain.RemoteUser{
 		Username: user.Username,
 	}, nil
 }
 func (c *GithubClient) UserRepos(username string, pageNum int, pageSize int) (domain.Page[domain.RemoteRepo], error) {
+	const op = "GithubClient.UserRepos"
 	fullURL, err := url.JoinPath(baseURL, "user", "repos")
 	if err != nil {
-		return domain.Page[domain.RemoteRepo]{}, err
+		return domain.Page[domain.RemoteRepo]{}, fmt.Errorf("%v: building url: %w", op, err)
 	}
 	resp, err := c.client.Get(fullURL)
 	if err != nil {
-		return domain.Page[domain.RemoteRepo]{}, err
+		return domain.Page[domain.RemoteRepo]{}, fmt.Errorf("%v: requesting repos: %w", op, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return domain.Page[domain.RemoteRepo]{}, domain.ErrClient
+		return domain.Page[domain.RemoteRepo]{}, fmt.Errorf("%v: %w: status %v", op, domain.ErrClient, resp.StatusCode)
 	}
 	decoder := json.NewDecoder(resp.Body)
 	var repos []GithubRepo
 	if err := decoder.Decode(&repos); err != nil {
-		return domain.Page[domain.RemoteRepo]{}, err
+		return domain.Page[domain.RemoteRepo]{}, fmt.Errorf("%v: decoding repos: %w", op, err)
 	}
 	if len(repos) == 0 {
 		return domain.Page[domain.RemoteRepo]{}, nil
@@ -173,39 +178,40 @@ func (c *GithubClient) UserRepos(username string, pageNum int, pageSize int) (do
 }
 
 func (c *GithubClient) RepoExists(owner, repo string) (bool, error) {
+	const op = "GithubClient.RepoExists"
 	fullURL, err := url.JoinPath(baseURL, "repos", owner, repo)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("%v: building url: %w", op, err)
 	}
 	resp, err := c.client.Get(fullURL)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("%v: requesting repo: %w", op, err)
 	}
 	defer resp.Body.Close()
 	return resp.StatusCode == http.StatusOK, nil
 }
 
 func (c *GithubClient) Directory(owner, repo, path string, pageNum int, pageSize int) (domain.Page[domain.DirElem], error) {
-
+	const op = "GithubClient.Directory"
 	fullURL, err := url.JoinPath(baseURL, "repos", owner, repo, "contents", path)
 	if err != nil {
-		return domain.Page[domain.DirElem]{}, err
+		return domain.Page[domain.DirElem]{}, fmt.Errorf("%v: building url: %w", op, err)
 	}
 
 	resp, err := c.client.Get(fullURL)
 	if err != nil {
-		return domain.Page[domain.DirElem]{}, err
+		return domain.Page[domain.DirElem]{}, fmt.Errorf("%v: requesting directory: %w", op, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return domain.Page[domain.DirElem]{}, domain.ErrClient
+		return domain.Page[domain.DirElem]{}, fmt.Errorf("%v: %w: status %v", op, domain.ErrClient, resp.StatusCode)
 	}
 	var dir []domain.DirElem
 
 	decoder := json.NewDecoder(resp.Body)
 
 	if err := decoder.Decode(&dir); err != nil {
-		return domain.Page[domain.DirElem]{}, err
+		return domain.Page[domain.DirElem]{}, fmt.Errorf("%v: decoding directory: %w", op, err)
 	}
 	leftBound := min(pageNum*pageSize, len(dir)-1)
 	rightBound := min(pageNum*pageSize+pageSize, len(dir))
@@ -219,36 +225,38 @@ func (c *GithubClient) Directory(owner, repo, path string, pageNum int, pageSize
 }
 
 func (c *GithubClient) File(owner, repo, path string) (domain.DirElem, error) {
+	const op = "GithubClient.File"
 	fullURL, err := url.JoinPath(baseURL, "repos", owner, repo, "contents", path)
 	if err != nil {
-		return domain.DirElem{}, err
+		return domain.DirElem{}, fmt.Errorf("%v: building url: %w", op, err)
 	}
 
 	resp, err := c.client.Get(fullURL)
 	if err != nil {
-		return domain.DirElem{}, err
+		return domain.DirElem{}, fmt.Errorf("%v: requesting file: %w", op, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return domain.DirElem{}, domain.ErrClient
+		return domain.DirElem{}, fmt.Errorf("%v: %w: status %v", op, domain.ErrClient, resp.StatusCode)
 	}
 	var file domain.DirElem
 
 	decoder := json.NewDecoder(resp.Body)
 
 	if err := decoder.Decode(&file); err != nil {
-		return domain.DirElem{}, err
+		return domain.DirElem{}, fmt.Errorf("%v: decoding file: %w", op, err)
 	}
 
 	return file, nil
 }
 
 func (c *GithubClient) SaveNote(ctx context.Context, owner, repo string, note domain.Note) error {
+	const op = "GithubClient.SaveNote"
 	file, err := c.File(owner, repo, note.Path)
 	if err == nil && file.Type == TypeFile {
 		raw, err := base64.StdEncoding.DecodeString(file.Content)
 		if err != nil {
-			return err
+			return fmt.Errorf("%v: decoding file content: %w", op, err)
 		}
 		return c.updateFile(ctx, CreateRequest{
 			Owner:   owner,

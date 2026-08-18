@@ -20,7 +20,8 @@ type telegramMock struct {
 	mu   sync.Mutex
 	sent []tgbotapi.Chattable
 
-	msgID int
+	msgID   int
+	sendErr error
 }
 
 func newTelegramMock() *telegramMock {
@@ -36,6 +37,11 @@ func (m *telegramMock) GetUpdatesChan() <-chan tgbotapi.Update {
 func (m *telegramMock) Send(c tgbotapi.Chattable) (tgbotapi.Message, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	if m.sendErr != nil {
+		return tgbotapi.Message{}, m.sendErr
+	}
+
 	if m.msgID == 0 {
 		m.msgID = 100
 	}
@@ -55,19 +61,20 @@ func (m *telegramMock) Sent() []tgbotapi.Chattable {
 }
 
 type sessionMock struct {
-	session bot.ChatSession
+	session      *bot.ChatSession
+	sessionErr   error
+	updateCalled bool
 
-	updated chan bot.ChatSession
+	updated chan *bot.ChatSession
 }
 
-func (m *sessionMock) SessionByChatID(chatID int64) (bot.ChatSession, error) {
-	return m.session, nil
+func (m *sessionMock) SessionByChatID(chatID int64) (*bot.ChatSession, error) {
+	return m.session, m.sessionErr
 }
 
-func (m *sessionMock) UpdateSession(
-	chatID int64,
-	new bot.ChatSession,
-) error {
+func (m *sessionMock) UpdateSession(new *bot.ChatSession) error {
+	m.updateCalled = true
+
 	select {
 	case m.updated <- new:
 	default:
@@ -76,44 +83,64 @@ func (m *sessionMock) UpdateSession(
 }
 
 type handlerMock struct {
-	called chan struct{}
-
-	update bot.Update
-
+	called   chan struct{}
 	response bot.Response
+	onHandle func(ctx context.Context, s *bot.ChatSession, u bot.Update) (bot.Response, error)
 }
 
 func (h *handlerMock) Handle(
 	ctx context.Context,
-	s bot.ChatSession,
+	s *bot.ChatSession,
 	u bot.Update,
 ) (bot.Response, error) {
-
-	h.update = u
+	if h.onHandle != nil {
+		return h.onHandle(ctx, s, u)
+	}
 
 	select {
 	case h.called <- struct{}{}:
 	default:
 	}
 
-	resp := h.response
-
-	if resp.Message == nil && resp.NewChatState == nil && resp.NewPayload == nil {
-		resp = bot.Response{
-			Message: tgbotapi.NewMessage(
-				u.ChatID,
-				"ok",
-			),
-		}
+	if h.response.Message != nil {
+		return h.response, nil
 	}
 
-	return resp, nil
+	return bot.Response{
+		Message: tgbotapi.NewMessage(u.ChatID, "ok"),
+	}, nil
 }
 
 func newHandlerMock() *handlerMock {
 	return &handlerMock{
 		called: make(chan struct{}, 1),
 	}
+}
+
+type errorHandlerMock struct {
+	matched     bool
+	called      chan struct{}
+	matchResult bool
+	response    bot.Response
+}
+
+func (h *errorHandlerMock) Handle(
+	ctx context.Context,
+	s *bot.ChatSession,
+	u bot.Update,
+	err error,
+) bot.Response {
+	select {
+	case h.called <- struct{}{}:
+	default:
+	}
+
+	return h.response
+}
+
+func (h *errorHandlerMock) Match(err error) bool {
+	h.matched = true
+	return h.matchResult
 }
 
 func waitSignal(t *testing.T, ch <-chan struct{}) {
@@ -159,19 +186,21 @@ func TestBot_CommandHandler(t *testing.T) {
 	tg := newTelegramMock()
 
 	session := &sessionMock{
-		session: bot.ChatSession{
-			ChatID: 123,
-		},
+		session: bot.NewChatSession(123),
 	}
 
 	b := bot.New(session, tg, slog.Default())
 
 	handler := newHandlerMock()
+	var capturedUpdate bot.Update
 
-	b.AddHandlerForCommand(
-		"/start",
-		handler,
-	)
+	b.AddHandler(bot.HandlerFunc{
+		HandleFunc: handler.Handle,
+		MatchFunc: func(ctx context.Context, s *bot.ChatSession, u bot.Update) bool {
+			capturedUpdate = u
+			return u.Text == "/start"
+		},
+	})
 
 	update := tgbotapi.Update{
 		Message: &tgbotapi.Message{
@@ -185,7 +214,7 @@ func TestBot_CommandHandler(t *testing.T) {
 	runBot(b, tg.updates, update)
 
 	waitSignal(t, handler.called)
-	assert.Equal(t, int64(123), handler.update.ChatID)
+	assert.Equal(t, int64(123), capturedUpdate.ChatID)
 }
 
 func TestBot_StateHandler(t *testing.T) {
@@ -195,20 +224,23 @@ func TestBot_StateHandler(t *testing.T) {
 	testState := bot.ChatState("waiting_name")
 
 	session := &sessionMock{
-		session: bot.ChatSession{
-			ChatID: 123,
-			State:  testState,
-		},
+		session: func() *bot.ChatSession {
+			s := bot.NewChatSession(123)
+			s.SetState(testState)
+			return s
+		}(),
 	}
 
 	b := bot.New(session, tg, slog.Default())
 
 	handler := newHandlerMock()
 
-	b.AddHandlerForState(
-		testState,
-		handler,
-	)
+	b.AddHandler(bot.HandlerFunc{
+		HandleFunc: handler.Handle,
+		MatchFunc: func(ctx context.Context, s *bot.ChatSession, u bot.Update) bool {
+			return s.State() == testState
+		},
+	})
 
 	update := tgbotapi.Update{
 		Message: &tgbotapi.Message{
@@ -222,7 +254,6 @@ func TestBot_StateHandler(t *testing.T) {
 	runBot(b, tg.updates, update)
 
 	waitSignal(t, handler.called)
-	assert.Equal(t, "Alex", handler.update.Text)
 }
 
 func TestBot_BothHandlerHasPriority(t *testing.T) {
@@ -230,10 +261,11 @@ func TestBot_BothHandlerHasPriority(t *testing.T) {
 	tg := newTelegramMock()
 
 	session := &sessionMock{
-		session: bot.ChatSession{
-			ChatID: 123,
-			State:  "register",
-		},
+		session: func() *bot.ChatSession {
+			s := bot.NewChatSession(123)
+			s.SetState("register")
+			return s
+		}(),
 	}
 
 	b := bot.New(session, tg, slog.Default())
@@ -242,21 +274,26 @@ func TestBot_BothHandlerHasPriority(t *testing.T) {
 	stateHandler := newHandlerMock()
 	bothHandler := newHandlerMock()
 
-	b.AddHandlerForCommand(
-		"/start",
-		commandHandler,
-	)
+	b.AddHandler(bot.HandlerFunc{
+		HandleFunc: bothHandler.Handle,
+		MatchFunc: func(ctx context.Context, s *bot.ChatSession, u bot.Update) bool {
+			return u.Text == "/start" && s.State() == "register"
+		},
+	})
 
-	b.AddHandlerForState(
-		"register",
-		stateHandler,
-	)
+	b.AddHandler(bot.HandlerFunc{
+		HandleFunc: commandHandler.Handle,
+		MatchFunc: func(ctx context.Context, s *bot.ChatSession, u bot.Update) bool {
+			return u.Text == "/start"
+		},
+	})
 
-	b.AddHandler(
-		"/start",
-		"register",
-		bothHandler,
-	)
+	b.AddHandler(bot.HandlerFunc{
+		HandleFunc: stateHandler.Handle,
+		MatchFunc: func(ctx context.Context, s *bot.ChatSession, u bot.Update) bool {
+			return s.State() == "register"
+		},
+	})
 
 	update := tgbotapi.Update{
 		Message: &tgbotapi.Message{
@@ -280,20 +317,23 @@ func TestBot_StateFallbackWhenBothMissing(t *testing.T) {
 	tg := newTelegramMock()
 
 	session := &sessionMock{
-		session: bot.ChatSession{
-			ChatID: 123,
-			State:  "register",
-		},
+		session: func() *bot.ChatSession {
+			s := bot.NewChatSession(123)
+			s.SetState("register")
+			return s
+		}(),
 	}
 
 	b := bot.New(session, tg, slog.Default())
 
 	stateHandler := newHandlerMock()
 
-	b.AddHandlerForState(
-		"register",
-		stateHandler,
-	)
+	b.AddHandler(bot.HandlerFunc{
+		HandleFunc: stateHandler.Handle,
+		MatchFunc: func(ctx context.Context, s *bot.ChatSession, u bot.Update) bool {
+			return s.State() == "register"
+		},
+	})
 
 	update := tgbotapi.Update{
 		Message: &tgbotapi.Message{
@@ -315,32 +355,27 @@ func TestBot_SessionChangesAfterHandle(t *testing.T) {
 
 	tg := newTelegramMock()
 
-	tg.msgID = 200
-
 	session := &sessionMock{
-		session: bot.ChatSession{
-			ChatID:           123,
-			State:            bot.DefaultChatState,
-			LastBotMessageID: 456,
-		},
-		updated: make(chan bot.ChatSession, 1),
+		session: bot.NewChatSession(123),
+		updated: make(chan *bot.ChatSession, 1),
 	}
 
 	b := bot.New(session, tg, slog.Default())
 
 	handler := newHandlerMock()
-	handler.response = bot.Response{
-		Message: tgbotapi.NewMessage(
-			123,
-			"ok",
-		),
-		NewChatState: &newState,
+	handler.onHandle = func(ctx context.Context, s *bot.ChatSession, u bot.Update) (bot.Response, error) {
+		s.SetState(newState)
+		return bot.Response{
+			Message: tgbotapi.NewMessage(123, "ok"),
+		}, nil
 	}
 
-	b.AddHandlerForCommand(
-		"/test",
-		handler,
-	)
+	b.AddHandler(bot.HandlerFunc{
+		HandleFunc: handler.Handle,
+		MatchFunc: func(ctx context.Context, s *bot.ChatSession, u bot.Update) bool {
+			return u.Text == "/test"
+		},
+	})
 
 	update := tgbotapi.Update{
 		Message: &tgbotapi.Message{
@@ -355,70 +390,10 @@ func TestBot_SessionChangesAfterHandle(t *testing.T) {
 
 	select {
 	case updated := <-session.updated:
-		assert.Equal(
-			t,
-			bot.ChatSession{
-				ChatID:           123,
-				State:            newState,
-				LastBotMessageID: tg.msgID,
-			},
-			updated,
-		)
+		assert.Equal(t, newState, updated.State())
 	case <-time.After(1 * time.Second):
 		t.Fatal("session was not updated")
 	}
-}
-
-type errorHandlerMock struct {
-	matched bool
-	called  chan struct{}
-
-	response bot.Response
-}
-
-func (h *errorHandlerMock) Handle(context.Context, bot.Update, error) bot.Response {
-	select {
-	case h.called <- struct{}{}:
-	default:
-	}
-
-	return h.response
-}
-
-func (h *errorHandlerMock) Match(err error) bool {
-	h.matched = true
-	return true
-}
-
-type failingHandler struct {
-	err error
-}
-
-func (h *failingHandler) Handle(
-	ctx context.Context,
-	s bot.ChatSession,
-	u bot.Update,
-) (bot.Response, error) {
-
-	return bot.Response{}, h.err
-}
-
-type failingSessionService struct {
-	err error
-}
-
-func (s *failingSessionService) SessionByChatID(
-	chatID int64,
-) (bot.ChatSession, error) {
-
-	return bot.NewChatSession(chatID), s.err
-}
-
-func (s *failingSessionService) UpdateSession(
-	chatID int64,
-	new bot.ChatSession,
-) error {
-	return nil
 }
 
 func TestBot_SessionError(t *testing.T) {
@@ -426,8 +401,9 @@ func TestBot_SessionError(t *testing.T) {
 	tg := newTelegramMock()
 
 	b := bot.New(
-		&failingSessionService{
-			err: errors.New("db error"),
+		&sessionMock{
+			session:    bot.NewChatSession(123),
+			sessionErr: errors.New("db error"),
 		},
 		tg,
 		slog.Default(),
@@ -461,9 +437,7 @@ func TestBot_ErrorHandlerCalled(t *testing.T) {
 	tg := newTelegramMock()
 
 	session := &sessionMock{
-		session: bot.ChatSession{
-			ChatID: 123,
-		},
+		session: bot.NewChatSession(123),
 	}
 
 	b := bot.New(session, tg, slog.Default())
@@ -471,7 +445,8 @@ func TestBot_ErrorHandlerCalled(t *testing.T) {
 	expectedText := "custom error"
 
 	eh := &errorHandlerMock{
-		called: make(chan struct{}, 1),
+		called:      make(chan struct{}, 1),
+		matchResult: true,
 		response: bot.Response{
 			Message: tgbotapi.NewMessage(
 				123,
@@ -482,12 +457,17 @@ func TestBot_ErrorHandlerCalled(t *testing.T) {
 
 	b.AddErrorHandler(eh)
 
-	b.AddHandlerForCommand(
-		"/start",
-		&failingHandler{
-			err: errors.New("boom"),
+	handler := newHandlerMock()
+	handler.onHandle = func(ctx context.Context, s *bot.ChatSession, u bot.Update) (bot.Response, error) {
+		return bot.Response{}, errors.New("boom")
+	}
+
+	b.AddHandler(bot.HandlerFunc{
+		HandleFunc: handler.Handle,
+		MatchFunc: func(ctx context.Context, s *bot.ChatSession, u bot.Update) bool {
+			return u.Text == "/start"
 		},
-	)
+	})
 
 	update := tgbotapi.Update{
 		Message: &tgbotapi.Message{
@@ -513,38 +493,32 @@ func TestBot_ErrorHandlerCalled(t *testing.T) {
 	)
 }
 
-type neverMatchErrorHandler struct{}
-
-func (h neverMatchErrorHandler) Handle(context.Context, bot.Update, error) bot.Response {
-	panic("should not be called")
-}
-
-func (h neverMatchErrorHandler) Match(err error) bool {
-	return false
-}
-
 func TestBot_DefaultErrorHandler(t *testing.T) {
 
 	tg := newTelegramMock()
 
 	session := &sessionMock{
-		session: bot.ChatSession{
-			ChatID: 123,
-		},
+		session: bot.NewChatSession(123),
 	}
 
 	b := bot.New(session, tg, slog.Default())
 
-	b.AddErrorHandler(
-		&neverMatchErrorHandler{},
-	)
+	b.AddErrorHandler(&errorHandlerMock{
+		called:      make(chan struct{}, 1),
+		matchResult: false,
+	})
 
-	b.AddHandlerForCommand(
-		"/start",
-		&failingHandler{
-			err: errors.New("boom"),
+	handler := newHandlerMock()
+	handler.onHandle = func(ctx context.Context, s *bot.ChatSession, u bot.Update) (bot.Response, error) {
+		return bot.Response{}, errors.New("boom")
+	}
+
+	b.AddHandler(bot.HandlerFunc{
+		HandleFunc: handler.Handle,
+		MatchFunc: func(ctx context.Context, s *bot.ChatSession, u bot.Update) bool {
+			return u.Text == "/start"
 		},
-	)
+	})
 
 	update := tgbotapi.Update{
 		Message: &tgbotapi.Message{
@@ -568,81 +542,31 @@ func TestBot_DefaultErrorHandler(t *testing.T) {
 	)
 }
 
-type failingTelegramMock struct {
-	updates chan tgbotapi.Update
-}
-
-func (m *failingTelegramMock) GetUpdatesChan() <-chan tgbotapi.Update {
-	return m.updates
-}
-
-func (m *failingTelegramMock) Send(
-	tgbotapi.Chattable,
-) (tgbotapi.Message, error) {
-
-	return tgbotapi.Message{},
-		errors.New("telegram error")
-}
-
-type stateChangingHandler struct{}
-
-func (h *stateChangingHandler) Handle(
-	ctx context.Context,
-	s bot.ChatSession,
-	u bot.Update,
-) (bot.Response, error) {
-
-	newState := bot.ChatState("next")
-
-	return bot.Response{
-		Message: tgbotapi.NewMessage(
-			u.ChatID,
-			"ok",
-		),
-		NewChatState: &newState,
-	}, nil
-}
-
-type trackingSessionMock struct {
-	session bot.ChatSession
-
-	updateCalled bool
-}
-
-func (m *trackingSessionMock) SessionByChatID(
-	chatID int64,
-) (bot.ChatSession, error) {
-
-	return m.session, nil
-}
-
-func (m *trackingSessionMock) UpdateSession(
-	chatID int64,
-	new bot.ChatSession,
-) error {
-
-	m.updateCalled = true
-	return nil
-}
-
 func TestBot_SendErrorDoesNotSaveState(t *testing.T) {
 
-	tg := &failingTelegramMock{
-		updates: make(chan tgbotapi.Update, 1),
-	}
+	tg := newTelegramMock()
+	tg.sendErr = errors.New("telegram error")
 
-	session := &trackingSessionMock{
-		session: bot.ChatSession{
-			ChatID: 123,
-		},
+	session := &sessionMock{
+		session: bot.NewChatSession(123),
 	}
 
 	b := bot.New(session, tg, slog.Default())
 
-	b.AddHandlerForCommand(
-		"/start",
-		&stateChangingHandler{},
-	)
+	handler := newHandlerMock()
+	handler.onHandle = func(ctx context.Context, s *bot.ChatSession, u bot.Update) (bot.Response, error) {
+		s.SetState("next")
+		return bot.Response{
+			Message: tgbotapi.NewMessage(u.ChatID, "ok"),
+		}, nil
+	}
+
+	b.AddHandler(bot.HandlerFunc{
+		HandleFunc: handler.Handle,
+		MatchFunc: func(ctx context.Context, s *bot.ChatSession, u bot.Update) bool {
+			return u.Text == "/start"
+		},
+	})
 
 	update := tgbotapi.Update{
 		Message: &tgbotapi.Message{
@@ -655,10 +579,7 @@ func TestBot_SendErrorDoesNotSaveState(t *testing.T) {
 
 	runBot(b, tg.updates, update)
 
-	assert.False(
-		t,
-		session.updateCalled,
-	)
+	assert.False(t, session.updateCalled)
 }
 
 type concurrentHandler struct {
@@ -669,7 +590,7 @@ type concurrentHandler struct {
 	maxHandling int
 }
 
-func (c *concurrentHandler) Handle(ctx context.Context, s bot.ChatSession, u bot.Update) (bot.Response, error) {
+func (c *concurrentHandler) Handle(ctx context.Context, s *bot.ChatSession, u bot.Update) (bot.Response, error) {
 
 	c.mu.Lock()
 	c.currentHandling++
@@ -700,24 +621,98 @@ func (c *concurrentHandler) MaxHandling() int {
 	return c.maxHandling
 }
 
+func TestBot_EditedMessage(t *testing.T) {
+
+	tg := newTelegramMock()
+
+	session := &sessionMock{
+		session: bot.NewChatSession(123),
+	}
+
+	b := bot.New(session, tg, slog.Default())
+
+	handler := newHandlerMock()
+	var capturedText string
+
+	b.AddHandler(bot.HandlerFunc{
+		HandleFunc: handler.Handle,
+		MatchFunc: func(ctx context.Context, s *bot.ChatSession, u bot.Update) bool {
+			capturedText = u.Text
+			return u.Text == "edited text"
+		},
+	})
+
+	update := tgbotapi.Update{
+		EditedMessage: &tgbotapi.Message{
+			Chat: &tgbotapi.Chat{
+				ID: 123,
+			},
+			Text: "edited text",
+		},
+	}
+
+	runBot(b, tg.updates, update)
+
+	waitSignal(t, handler.called)
+	assert.Equal(t, "edited text", capturedText)
+}
+
+func TestBot_CallbackQuery(t *testing.T) {
+
+	tg := newTelegramMock()
+
+	session := &sessionMock{
+		session: bot.NewChatSession(123),
+	}
+
+	b := bot.New(session, tg, slog.Default())
+
+	handler := newHandlerMock()
+	var capturedCallbackData string
+
+	b.AddHandler(bot.HandlerFunc{
+		HandleFunc: handler.Handle,
+		MatchFunc: func(ctx context.Context, s *bot.ChatSession, u bot.Update) bool {
+			capturedCallbackData = u.CallbackData
+			return u.CallbackData == "action_confirm"
+		},
+	})
+
+	update := tgbotapi.Update{
+		CallbackQuery: &tgbotapi.CallbackQuery{
+			Message: &tgbotapi.Message{
+				Chat: &tgbotapi.Chat{
+					ID: 123,
+				},
+			},
+			Data: "action_confirm",
+		},
+	}
+
+	runBot(b, tg.updates, update)
+
+	waitSignal(t, handler.called)
+	assert.Equal(t, "action_confirm", capturedCallbackData)
+}
+
 func TestBot_ChatsCanBeHandledByOnlyOneHandlerAtATime(t *testing.T) {
 
 	tg := newTelegramMock()
 
 	session := &sessionMock{
-		session: bot.ChatSession{
-			ChatID: 123,
-		},
+		session: bot.NewChatSession(123),
 	}
 
 	b := bot.New(session, tg, slog.Default())
 
 	handler := &concurrentHandler{}
 
-	b.AddHandlerForCommand(
-		"/start",
-		handler,
-	)
+	b.AddHandler(bot.HandlerFunc{
+		HandleFunc: handler.Handle,
+		MatchFunc: func(ctx context.Context, s *bot.ChatSession, u bot.Update) bool {
+			return u.Text == "/start"
+		},
+	})
 
 	update := tgbotapi.Update{
 		Message: &tgbotapi.Message{

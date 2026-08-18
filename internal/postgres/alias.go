@@ -33,6 +33,7 @@ func NewAliasStorage(db *sql.DB, pageCountCache AliasPageCountCache) *AliasStora
 }
 
 func (s *AliasStorage) Save(ctx context.Context, a domain.Alias) (err error) {
+	const op = "AliasStorage.Save"
 	const query = `
 	INSERT INTO alias (id, chat_id, path, alias)
 	VALUES
@@ -40,7 +41,7 @@ func (s *AliasStorage) Save(ctx context.Context, a domain.Alias) (err error) {
 	`
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("%w:%w", domain.ErrDb, err)
+		return fmt.Errorf("%v: beginning transaction: %w: %w", op, domain.ErrDb, err)
 	}
 	defer func() {
 		if err != nil {
@@ -48,7 +49,7 @@ func (s *AliasStorage) Save(ctx context.Context, a domain.Alias) (err error) {
 		} else {
 			err = tx.Commit()
 			if err != nil {
-				err = fmt.Errorf("%w:%w", domain.ErrDb, err)
+				err = fmt.Errorf("%v: committing transaction: %w: %w", op, domain.ErrDb, err)
 			}
 		}
 	}()
@@ -63,9 +64,9 @@ func (s *AliasStorage) Save(ctx context.Context, a domain.Alias) (err error) {
 	if err != nil {
 		pqErr := new(pq.Error)
 		if errors.As(err, &pqErr) && pqErr.Code == pqerror.UniqueViolation {
-			return fmt.Errorf("%w:%w:%w", domain.ErrAlreadyExists, domain.ErrDb, err)
+			return fmt.Errorf("%v: saving alias, unique violation: %w: %w: %w", op, domain.ErrAlreadyExists, domain.ErrDb, err)
 		}
-		return fmt.Errorf("%w:%w", domain.ErrDb, err)
+		return fmt.Errorf("%v: saving alias: %w: %w", op, domain.ErrDb, err)
 	}
 	if err := s.pageCountCache.Delete(ctx, a.ChatID, domain.DefaultPageSize); err != nil {
 		log.Printf("Error while deleting alias cache: %v", err)
@@ -74,6 +75,7 @@ func (s *AliasStorage) Save(ctx context.Context, a domain.Alias) (err error) {
 }
 
 func (s *AliasStorage) AliasPage(ctx context.Context, chatID int64, pageNum, pageSize int) (domain.Page[domain.Alias], error) {
+	const op = "AliasStorage.AliasPage"
 	if pageNum < 0 || pageSize < 0 {
 		return domain.Page[domain.Alias]{}, domain.ErrBadArgument
 	}
@@ -96,7 +98,7 @@ func (s *AliasStorage) AliasPage(ctx context.Context, chatID int64, pageNum, pag
 			countQuery, chatID,
 		).Scan(&count)
 		if err != nil {
-			return domain.Page[domain.Alias]{}, fmt.Errorf("%w:%w", domain.ErrDb, err)
+			return domain.Page[domain.Alias]{}, fmt.Errorf("%v: counting aliases: %w: %w", op, domain.ErrDb, err)
 		}
 		page.TotalPages = int(
 			math.Ceil(
@@ -119,7 +121,7 @@ func (s *AliasStorage) AliasPage(ctx context.Context, chatID int64, pageNum, pag
 	`
 	rows, err := s.db.QueryContext(ctx, query, chatID, offset, limit)
 	if err != nil {
-		return domain.Page[domain.Alias]{}, fmt.Errorf("%w:%w", domain.ErrDb, err)
+		return domain.Page[domain.Alias]{}, fmt.Errorf("%v: querying aliases page: %w: %w", op, domain.ErrDb, err)
 	}
 	templates := make([]domain.Alias, pageSize)
 	cur := 0
@@ -132,7 +134,7 @@ func (s *AliasStorage) AliasPage(ctx context.Context, chatID int64, pageNum, pag
 			&templates[cur].Alias,
 		)
 		if err != nil {
-			return domain.Page[domain.Alias]{}, fmt.Errorf("%w:%w", domain.ErrDb, err)
+			return domain.Page[domain.Alias]{}, fmt.Errorf("%v: scanning alias row: %w: %w", op, domain.ErrDb, err)
 		}
 		cur++
 	}
@@ -141,9 +143,10 @@ func (s *AliasStorage) AliasPage(ctx context.Context, chatID int64, pageNum, pag
 }
 
 func (s *AliasStorage) Alias(ctx context.Context, id string, chatID int64) (domain.Alias, error) {
+	const op = "AliasStorage.Alias"
 	parsedID, err := uuid.Parse(id)
 	if err != nil {
-		return domain.Alias{}, fmt.Errorf("%w:%w", domain.ErrBadArgument, err)
+		return domain.Alias{}, fmt.Errorf("%v: parsing alias id: %w: %w", op, domain.ErrBadArgument, err)
 	}
 	const query = `
 	SELECT chat_id, path, alias
@@ -152,7 +155,7 @@ func (s *AliasStorage) Alias(ctx context.Context, id string, chatID int64) (doma
 	`
 	var alias domain.Alias
 	if err := s.db.QueryRowContext(ctx, query, id, chatID).Scan(&alias.ChatID, &alias.Path, &alias.Alias); err != nil {
-		return domain.Alias{}, fmt.Errorf("%w:%w", domain.ErrDb, err)
+		return domain.Alias{}, fmt.Errorf("%v: querying alias: %w: %w", op, domain.ErrDb, err)
 	}
 
 	alias.ID = parsedID

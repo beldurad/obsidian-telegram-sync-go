@@ -18,10 +18,10 @@ var ErrInternalServer = fmt.Errorf("Internal Server Error")
 var ErrUnknown = fmt.Errorf("Unknown error while handling message")
 
 type Update struct {
-	// [ChatID], [Text], [ButtonPressed] - common fields for trivial updates
-	ChatID        int64
-	Text          string
-	ButtonPressed bool
+	// [ChatID], [Text], [CallbackData] - common fields for trivial updates
+	ChatID       int64
+	Text         string
+	CallbackData string
 
 	// [Raw] - for more complex updates
 	Raw tgbotapi.Update
@@ -32,25 +32,21 @@ func extractUpdate(u tgbotapi.Update) Update {
 	update.Raw = u
 	chat := u.FromChat()
 	if chat == nil {
-		return update
+		return Update{}
 	}
 	update.ChatID = chat.ID
-	if u.CallbackQuery != nil {
-		update.ButtonPressed = true
-		update.Text = u.CallbackData()
-	} else if u.Message != nil {
+	update.CallbackData = u.CallbackData()
+	switch {
+	case u.Message != nil:
 		update.Text = u.Message.Text
+	case u.EditedMessage != nil:
+		update.Text = u.EditedMessage.Text
 	}
 	return update
 }
 
 type Response struct {
 	Message tgbotapi.Chattable
-
-	// New chat state resulting from the update handling
-	NewChatState *ChatState
-
-	NewPayload json.RawMessage
 }
 
 type Command string
@@ -60,46 +56,95 @@ type ChatState string
 var DefaultChatState = ChatState("")
 
 type ChatSession struct {
-	ChatID           int64
-	State            ChatState
-	LastBotMessageID int
-	Payload          json.RawMessage
+	chatID           int64
+	state            ChatState
+	lastBotMessageID int
+	payload          json.RawMessage
 }
 
-func NewChatSession(chatID int64) ChatSession {
-	return ChatSession{
-		ChatID: chatID,
+func NewChatSession(chatID int64) *ChatSession {
+	return &ChatSession{
+		chatID: chatID,
 	}
 }
 
+func (s *ChatSession) ChatID() int64 {
+	return s.chatID
+}
+
+func (s *ChatSession) SetState(state ChatState) {
+	s.state = state
+}
+
+func (s *ChatSession) State() ChatState {
+	return s.state
+}
+
+func (s *ChatSession) ToDefault() {
+	s.state = DefaultChatState
+	s.payload = nil
+}
+
+func (s *ChatSession) SetPayload(p json.RawMessage) {
+	s.payload = p
+}
+
+func (s *ChatSession) Payload() json.RawMessage {
+	return s.payload
+}
+func (s *ChatSession) LastBotMessageID() int {
+	return s.lastBotMessageID
+}
+
+func (s *ChatSession) EditMsgAvailable() bool {
+	return s.lastBotMessageID > 0
+}
+
 type ChatSessionService interface {
-	SessionByChatID(chatID int64) (ChatSession, error)
-	UpdateSession(chatID int64, new ChatSession) error
+	SessionByChatID(chatID int64) (*ChatSession, error)
+	UpdateSession(new *ChatSession) error
 }
 
 type Handler interface {
-	Handle(context.Context, ChatSession, Update) (Response, error)
+	Handle(context.Context, *ChatSession, Update) (Response, error)
+	Match(context.Context, *ChatSession, Update) bool
 }
 
-type HandlerFunc func(context.Context, ChatSession, Update) (Response, error)
+type HandlerFunc struct {
+	HandleFunc func(context.Context, *ChatSession, Update) (Response, error)
+	MatchFunc  func(context.Context, *ChatSession, Update) bool
+}
 
-func (f HandlerFunc) Handle(ctx context.Context, s ChatSession, u Update) (Response, error) {
-	return f(ctx, s, u)
+var _ Handler = HandlerFunc{}
+
+func (f HandlerFunc) Handle(ctx context.Context, s *ChatSession, u Update) (Response, error) {
+	return f.HandleFunc(ctx, s, u)
+}
+
+func (f HandlerFunc) Match(ctx context.Context, s *ChatSession, u Update) bool {
+	return f.MatchFunc(ctx, s, u)
 }
 
 type Middleware func(next Handler) Handler
 
-func merge(h Handler, middlewares ...Middleware) Handler {
-	cur := h
-	for i := len(middlewares) - 1; i >= 0; i-- {
-		cur = middlewares[i](cur)
+type group struct {
+	handlers    []Handler
+	middlewares []Middleware
+}
+
+func NewGroup(handlers ...Handler) *group {
+	return &group{
+		handlers: handlers,
 	}
-	return cur
+}
+
+func (g *group) Use(middlewares ...Middleware) {
+	g.middlewares = append(g.middlewares, middlewares...)
 }
 
 type ErrorHandler interface {
 	Match(err error) bool
-	Handle(context.Context, Update, error) Response
+	Handle(context.Context, *ChatSession, Update, error) Response
 }
 
 func defaultErrorHandle(chatID int64, err error) Response {
@@ -108,10 +153,10 @@ func defaultErrorHandle(chatID int64, err error) Response {
 	}
 }
 
-func (b *Bot) errHandle(ctx context.Context, u Update, err error) Response {
+func (b *Bot) errHandle(ctx context.Context, s *ChatSession, u Update, err error) Response {
 	for _, h := range b.errorHandlers {
 		if h.Match(err) {
-			return h.Handle(ctx, u, err)
+			return h.Handle(ctx, s, u, err)
 		}
 	}
 	return defaultErrorHandle(u.ChatID, err)
@@ -120,11 +165,6 @@ func (b *Bot) errHandle(ctx context.Context, u Update, err error) Response {
 type TelegramBotClient interface {
 	GetUpdatesChan() <-chan tgbotapi.Update
 	Send(tgbotapi.Chattable) (tgbotapi.Message, error)
-}
-
-type handlerResolveKey struct {
-	ChatState
-	Command
 }
 
 // [Bot] is a structure responsible for
@@ -139,12 +179,9 @@ type Bot struct {
 
 	sessionService ChatSessionService
 
-	errorHandlers []ErrorHandler
+	groups []*group
 
-	// Maps for resolving update [Handler]
-	byState   map[ChatState]Handler
-	byCommand map[Command]Handler
-	byBoth    map[handlerResolveKey]Handler
+	errorHandlers []ErrorHandler
 
 	globalMiddlewares []Middleware
 
@@ -157,9 +194,7 @@ func New(sessionService ChatSessionService, botClient TelegramBotClient, log *sl
 		tgBot:             botClient,
 		sessionService:    sessionService,
 		errorHandlers:     make([]ErrorHandler, 0),
-		byState:           make(map[ChatState]Handler),
-		byCommand:         make(map[Command]Handler),
-		byBoth:            make(map[handlerResolveKey]Handler),
+		groups:            make([]*group, 0),
 		globalMiddlewares: make([]Middleware, 0),
 		log:               log,
 	}
@@ -169,39 +204,41 @@ func New(sessionService ChatSessionService, botClient TelegramBotClient, log *sl
 	return bot
 }
 
-func (b *Bot) AddHandlerForCommand(c Command, h Handler, m ...Middleware) {
-	b.byCommand[c] = merge(h, m...)
+func (b *Bot) AddHandler(h Handler, m ...Middleware) {
+	g := NewGroup(h)
+	g.Use(m...)
+	b.groups = append(b.groups, g)
 }
 
-func (b *Bot) AddHandlerForState(s ChatState, h Handler, m ...Middleware) {
-	b.byState[s] = merge(h, m...)
-}
-
-func (b *Bot) AddHandler(c Command, s ChatState, h Handler, m ...Middleware) {
-	k := handlerResolveKey{
-		ChatState: s,
-		Command:   c,
-	}
-	b.byBoth[k] = merge(h, m...)
+func (b *Bot) AddGroup(g *group) {
+	b.groups = append(b.groups, g)
 }
 
 func (b *Bot) Use(m Middleware) {
 	b.globalMiddlewares = append(b.globalMiddlewares, m)
 }
 
-func (b *Bot) resolveHandler(c Command, s ChatState) Handler {
-	key := handlerResolveKey{
-		Command:   c,
-		ChatState: s,
+func (b *Bot) handler(ctx context.Context, s *ChatSession, u Update) Handler {
+	h, g := func() (Handler, *group) {
+		for _, g := range b.groups {
+			for _, h := range g.handlers {
+				if h.Match(ctx, s, u) {
+					return h, g
+				}
+			}
+		}
+		return nil, nil
+	}()
+	if h == nil || g == nil {
+		return nil
 	}
-	if h, ok := b.byBoth[key]; ok {
-		return h
-	} else if h, ok = b.byState[s]; ok {
-		return h
-	} else if h, ok := b.byCommand[c]; ok {
-		return h
+	for i := len(g.middlewares) - 1; i >= 0; i-- {
+		h = g.middlewares[i](h)
 	}
-	return nil
+	for i := len(b.globalMiddlewares) - 1; i >= 0; i-- {
+		h = b.globalMiddlewares[i](h)
+	}
+	return h
 }
 
 func (b *Bot) SetChatSessionService(s ChatSessionService) {
@@ -213,53 +250,44 @@ func (b *Bot) AddErrorHandler(h ErrorHandler) {
 }
 
 func (b *Bot) handle(ctx context.Context, u tgbotapi.Update) {
+	const op = "Bot.handle"
 	log := b.log.With("chat_id", u.FromChat().ID, "msg_id", u.UpdateID)
-
-	log.Debug("new update", "tg_update", u)
 
 	var resp Response
 
-	chat := u.FromChat()
-	if chat == nil {
-		return
-	}
 	update := extractUpdate(u)
-	if update.Text == "" {
-		log.Debug("empty text")
+	if update == (Update{}) {
 		return
 	}
-	session, err := b.sessionService.SessionByChatID(chat.ID)
 
+	chatID := update.ChatID
+
+	session, err := b.sessionService.SessionByChatID(chatID)
 	if err != nil {
-		err := fmt.Errorf("%w:%w", ErrInternalServer, err)
-		log.Debug("error while getting session", "error", err)
-		resp = Response{
-			Message: tgbotapi.NewMessage(chat.ID, ErrInternalServer.Error()),
-		}
-		_, err = b.tgBot.Send(resp.Message)
+		err := fmt.Errorf("%v: %w: %w", op, ErrInternalServer, err)
+		log.Error("error while getting session", "error", err)
+
+		_, err = b.tgBot.Send(tgbotapi.NewMessage(chatID, ErrInternalServer.Error()))
 		if err != nil {
 			log.Error("error while sending error message", "error", err)
 		}
 		return
 	}
 
-	handler := b.resolveHandler(Command(update.Text), session.State)
+	handler := b.handler(ctx, session, update)
 	if handler == nil {
 		log.Debug("no suitable handler found")
 		return
-	}
-	for i := len(b.globalMiddlewares) - 1; i >= 0; i-- {
-		handler = b.globalMiddlewares[i](handler)
 	}
 
 	ctx = context.WithValue(ctx, ChatSessionKey, session)
 	resp, err = handler.Handle(ctx, session, update)
 	if err != nil {
 		log.Debug("handler error", "error", err)
-		resp = b.errHandle(ctx, update, err)
+		resp = b.errHandle(ctx, session, update, err)
 	}
 
-	msg, err := b.tgBot.Send(resp.Message)
+	_, err = b.tgBot.Send(resp.Message)
 
 	// If an error occurs while sending a response, the program does not save the new session state.
 	if err != nil {
@@ -267,12 +295,7 @@ func (b *Bot) handle(ctx context.Context, u tgbotapi.Update) {
 		return
 	}
 
-	session.LastBotMessageID = msg.MessageID
-	if resp.NewChatState != nil {
-		session.State = *resp.NewChatState
-	}
-	session.Payload = resp.NewPayload
-	err = b.sessionService.UpdateSession(chat.ID, session)
+	err = b.sessionService.UpdateSession(session)
 	if err != nil {
 		log.Error("error while updating session", "error", err)
 	}

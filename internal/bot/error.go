@@ -14,10 +14,8 @@ var ErrCantHandle = fmt.Errorf("Handler can't handle")
 
 type AlreadyExistsErrorHandler struct{}
 
-func (a *AlreadyExistsErrorHandler) Handle(ctx context.Context, u bot.Update, err error) bot.Response {
-	return bot.Response{
-		Message: tgbotapi.NewMessage(u.ChatID, "Ресурс уже существует"),
-	}
+func (a *AlreadyExistsErrorHandler) Handle(ctx context.Context, u bot.Update, err error) tgbotapi.Chattable {
+	return tgbotapi.NewMessage(u.ChatID, "Ресурс уже существует")
 }
 
 func (a *AlreadyExistsErrorHandler) Match(err error) bool {

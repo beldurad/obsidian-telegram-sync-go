@@ -53,11 +53,11 @@ func TestAuthHandler_Handle_Authenticated(t *testing.T) {
 
 	handler := NewAuthHandler(authService)
 
+	session := bot.NewChatSession(123)
+
 	resp, err := handler.Handle(
 		context.Background(),
-		bot.ChatSession{
-			ChatID: 123,
-		},
+		session,
 		bot.Update{
 			ChatID: 123,
 			Text:   "/start",
@@ -85,11 +85,11 @@ func TestAuthHandler_Handle_NotAuthenticated(t *testing.T) {
 
 	handler := NewAuthHandler(authService)
 
+	session := bot.NewChatSession(123)
+
 	resp, err := handler.Handle(
 		context.Background(),
-		bot.ChatSession{
-			ChatID: 123,
-		},
+		session,
 		bot.Update{
 			ChatID: 123,
 			Text:   "/start",
@@ -125,11 +125,11 @@ func TestAuthHandler_Handle_GenerateAuthURLError(t *testing.T) {
 
 	handler := NewAuthHandler(authService)
 
+	session := bot.NewChatSession(123)
+
 	resp, err := handler.Handle(
 		context.Background(),
-		bot.ChatSession{
-			ChatID: 123,
-		},
+		session,
 		bot.Update{
 			ChatID: 123,
 			Text:   "/start",

@@ -2,6 +2,7 @@ package cache
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/beldurad/obsidian-telegram-sync-go/foundation/cache"
 	"github.com/beldurad/obsidian-telegram-sync-go/internal/domain"
@@ -27,9 +28,10 @@ func (s *OauthContextStorage) Save(ctx context.Context, c *github.OAuthContext) 
 }
 
 func (s *OauthContextStorage) ContextByState(ctx context.Context, state string) (*github.OAuthContext, error) {
+	const op = "OauthContextStorage.ContextByState"
 	oauthCtx, ok := s.lru.Get(state)
 	if !ok {
-		return nil, domain.ErrNotFound
+		return nil, fmt.Errorf("%v: oauth context not found: %w", op, domain.ErrNotFound)
 	}
 	return oauthCtx, nil
 }
@@ -49,9 +51,10 @@ func (s *OAuthTokenStorage) Save(ctx context.Context, chatID int64, token *oauth
 	return nil
 }
 func (s *OAuthTokenStorage) Token(ctx context.Context, chatID int64) (*oauth2.Token, error) {
+	const op = "OAuthTokenStorage.Token"
 	token, ok := s.lru.Get(chatID)
 	if !ok {
-		return nil, domain.ErrNotFound
+		return nil, fmt.Errorf("%v: token not found: %w", op, domain.ErrNotFound)
 	}
 	return token, nil
 }

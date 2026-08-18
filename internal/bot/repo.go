@@ -3,7 +3,7 @@ package bot
 import (
 	"context"
 	"encoding/json"
-	"log"
+	"fmt"
 	"slices"
 
 	"github.com/beldurad/obsidian-telegram-sync-go/foundation/bot"
@@ -17,10 +17,10 @@ var RepoSetState = bot.ChatState("SETTING_REPO")
 
 // ===== COMMANDS =====
 
-const RepoSetCommand = "/set-repo"
+const CommandSetRepo = "/set-repo"
 
 var RepoSetCommands = []string{
-	RepoSetCommand,
+	CommandSetRepo,
 	NextPageCommand,
 	PrevPageCommand,
 }
@@ -41,6 +41,8 @@ type RepoSetHandler struct {
 	vaultService UserVaultService
 }
 
+var _ bot.Handler = &RepoSetHandler{}
+
 func NewRepoSetHandler(clientGetter ClientGetter, vaultService UserVaultService) *RepoSetHandler {
 	return &RepoSetHandler{
 		clientGetter: clientGetter,
@@ -48,39 +50,46 @@ func NewRepoSetHandler(clientGetter ClientGetter, vaultService UserVaultService)
 	}
 }
 
-func (h *RepoSetHandler) Register(b *bot.Bot, m ...bot.Middleware) {
-	b.AddHandlerForCommand(RepoSetCommand, h)
-	b.AddHandlerForState(RepoSetState, h)
+func (h *RepoSetHandler) Match(ctx context.Context, s *bot.ChatSession, u bot.Update) bool {
+	return u.Text == CommandSetRepo || s.State() == RepoSetState
 }
 
-func (h *RepoSetHandler) Handle(ctx context.Context, s bot.ChatSession, u bot.Update) (bot.Response, error) {
-	chatID := s.ChatID
-	state := s.State
+func (h *RepoSetHandler) Handle(ctx context.Context, s *bot.ChatSession, u bot.Update) (resp bot.Response, err error) {
+	const op = "RepoSetHandler.Handle"
+
+	defer func() {
+		if err != nil {
+			s.ToDefault()
+		}
+	}()
+
+	chatID := s.ChatID()
+	state := s.State()
 
 	client, err := h.clientGetter.Client(ctx, chatID)
 	if err != nil {
-		return bot.Response{}, err
+		resp, err = bot.Response{}, fmt.Errorf("%v: getting client: %w", op, err)
+		return
 	}
 	user, err := client.UserInfo()
 	if err != nil {
-		return bot.Response{}, err
+		resp, err = bot.Response{}, fmt.Errorf("%v: getting user info: %w", op, err)
+		return
 	}
 
 	if state == RepoSetState &&
 		!slices.Contains(RepoSetCommands, u.Raw.CallbackData()) {
-		log.Println("repo chosen")
-		return h.handleChosenRepo(ctx, s, client, u.Raw.CallbackData(), user.Username)
+		resp, err = h.handleChosenRepo(ctx, s, client, u.CallbackData, user.Username)
+		return
 	}
 
 	var payload pagePayload
-	if s.State != bot.DefaultChatState {
-		raw := s.Payload
-		err := json.Unmarshal([]byte(raw), &payload)
+	if state != bot.DefaultChatState {
+		raw := s.Payload()
+		err := json.Unmarshal(raw, &payload)
 		if err != nil {
-			log.Printf("error while unmarshalling: %v", err)
-			return bot.Response{}, err
+			return bot.Response{}, fmt.Errorf("%v: unmarshaling payload: %w", op, err)
 		}
-		log.Printf("unmarshalled previous payload: %v", payload)
 		switch u.Raw.CallbackData() {
 		case NextPageCommand:
 			payload.PageNum++
@@ -89,11 +98,11 @@ func (h *RepoSetHandler) Handle(ctx context.Context, s bot.ChatSession, u bot.Up
 		}
 	}
 
-	log.Printf("payload: %v", payload)
 	repoPage, err := client.UserRepos(user.Username, payload.PageNum, domain.DefaultPageSize)
 	if err != nil {
-		return bot.Response{}, err
+		return bot.Response{}, fmt.Errorf("%v: getting user repos: %w", op, err)
 	}
+
 	buttons := make([][]tgbotapi.InlineKeyboardButton, len(repoPage.Values))
 	for i, repo := range repoPage.Values {
 		buttons[i] = []tgbotapi.InlineKeyboardButton{
@@ -116,35 +125,36 @@ func (h *RepoSetHandler) Handle(ctx context.Context, s bot.ChatSession, u bot.Up
 
 	var c tgbotapi.Chattable
 
-	if s.State == bot.DefaultChatState || s.LastBotMessageID == 0 {
+	if state == bot.DefaultChatState || s.LastBotMessageID() == 0 {
 		msgCfg := tgbotapi.NewMessage(chatID, "Выберите репозиторий хранилища")
 		msgCfg.ReplyMarkup = markup
 		c = msgCfg
 	} else {
-		msgCfg := tgbotapi.NewEditMessageCaption(s.ChatID, s.LastBotMessageID, "Выберите репозиторий хранилища")
+		msgCfg := tgbotapi.NewEditMessageText(chatID, s.LastBotMessageID(), "Выберите репозиторий хранилища")
 		msgCfg.ReplyMarkup = &markup
 		c = msgCfg
 	}
 
 	bytes, err := json.Marshal(payload)
 	if err != nil {
-		return bot.Response{}, err
+		return bot.Response{}, fmt.Errorf("%v: marshaling payload: %w", op, err)
 	}
 
-	return bot.Response{
-		Message:      c,
-		NewChatState: &RepoSetState,
-		NewPayload:   bytes,
-	}, nil
+	s.SetState(RepoSetState)
+	s.SetPayload(bytes)
 
+	resp, err = bot.Response{Message: c}, nil
+	return
 }
 
-func (h *RepoSetHandler) handleChosenRepo(ctx context.Context, session bot.ChatSession, client domain.RemoteStorage, repo, owner string) (bot.Response, error) {
-	chatID := session.ChatID
-	lastMessageID := session.LastBotMessageID
+func (h *RepoSetHandler) handleChosenRepo(ctx context.Context, session *bot.ChatSession, client domain.RemoteStorage, repo, owner string) (bot.Response, error) {
+	const op = "handleChosenRepo"
+	chatID := session.ChatID()
+	lastMessageID := session.LastBotMessageID()
+
 	exists, err := client.RepoExists(owner, repo)
 	if err != nil {
-		return bot.Response{}, err
+		return bot.Response{}, fmt.Errorf("%v: checking repo exists: %w", op, err)
 	}
 	if !exists {
 		msgCfg := tgbotapi.NewEditMessageText(
@@ -152,41 +162,44 @@ func (h *RepoSetHandler) handleChosenRepo(ctx context.Context, session bot.ChatS
 			lastMessageID,
 			"Такого репозитория не существует попробуйте еще раз командой /set-repo",
 		)
-		return bot.Response{
-			Message: msgCfg,
-		}, nil
+		return bot.Response{Message: msgCfg}, nil
 	}
+
 	vault := domain.UserVault{
 		ChatID: chatID,
 		Owner:  owner,
 		Repo:   repo,
 	}
 	if err := h.vaultService.Save(ctx, vault); err != nil {
-		return bot.Response{}, err
+		return bot.Response{}, fmt.Errorf("%v: saving vault: %w", op, err)
 	}
 	msgCfg := tgbotapi.NewEditMessageText(
 		chatID,
 		lastMessageID,
 		"Репозиторий успешно установлен",
 	)
-	return bot.Response{
-		Message: msgCfg,
-	}, nil
+	return bot.Response{Message: msgCfg}, nil
 }
 
 func (h *RepoSetHandler) RepoSetMiddleware() bot.Middleware {
 	return bot.Middleware(func(next bot.Handler) bot.Handler {
-		return bot.HandlerFunc(func(ctx context.Context, s bot.ChatSession, u bot.Update) (bot.Response, error) {
-			exists, err := h.vaultService.ExistsByChatID(ctx, u.ChatID)
-			if err != nil {
-				return bot.Response{}, err
-			}
-			if !exists {
-				return bot.Response{
-					Message: tgbotapi.NewMessage(u.ChatID, "Установите репозиторий в котором находится ваще хранилище через /set-repo"),
-				}, nil
-			}
-			return next.Handle(ctx, s, u)
-		})
+		return bot.HandlerFunc{
+			HandleFunc: func(ctx context.Context, s *bot.ChatSession, u bot.Update) (bot.Response, error) {
+				const op = "RepoSetMiddleware"
+				exists, err := h.vaultService.ExistsByChatID(ctx, u.ChatID)
+				if err != nil {
+					return bot.Response{}, fmt.Errorf("%v: checking vault exists: %w", op, err)
+				}
+				if !exists {
+					return bot.Response{
+						Message: tgbotapi.NewMessage(u.ChatID, "Установите репозиторий в котором находится ваще хранилище через /set-repo"),
+					}, nil
+				}
+				return next.Handle(ctx, s, u)
+			},
+			MatchFunc: func(ctx context.Context, s *bot.ChatSession, u bot.Update) bool {
+				return next.Match(ctx, s, u)
+			},
+		}
 	})
 }

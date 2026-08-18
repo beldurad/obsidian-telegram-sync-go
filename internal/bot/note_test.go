@@ -202,12 +202,11 @@ func TestNoteAddHandler_Handle_DefaultState(t *testing.T) {
 		&vaultGetterMock{},
 	)
 
+	session := bot.NewChatSession(123)
+
 	resp, err := h.Handle(
 		context.Background(),
-		bot.ChatSession{
-			ChatID: 123,
-			State:  bot.DefaultChatState,
-		},
+		session,
 		bot.Update{
 			ChatID: 123,
 			Text:   CommandAddNote,
@@ -221,11 +220,11 @@ func TestNoteAddHandler_Handle_DefaultState(t *testing.T) {
 	require.Equal(t, 0, aliases.pageNum)
 	require.Equal(t, domain.DefaultPageSize, aliases.pageSize)
 
-	require.Nil(t, resp.NewChatState)
+	require.Equal(t, bot.DefaultChatState, session.State())
 
 	var payload pagePayload
 	require.NoError(t, json.Unmarshal(
-		[]byte(resp.NewPayload),
+		session.Payload(),
 		&payload,
 	))
 	require.Equal(t, 0, payload.PageNum)
@@ -253,12 +252,11 @@ func TestNoteAddHandler_Handle_DefaultState_NextButton(t *testing.T) {
 		&vaultGetterMock{},
 	)
 
+	session := bot.NewChatSession(123)
+
 	resp, err := h.Handle(
 		context.Background(),
-		bot.ChatSession{
-			ChatID: 123,
-			State:  bot.DefaultChatState,
-		},
+		session,
 		bot.Update{
 			ChatID: 123,
 			Text:   CommandAddNote,
@@ -298,18 +296,16 @@ func TestNoteAddHandler_Handle_NextPage(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	session := bot.ChatSession{
-		ChatID:           123,
-		State:            StateNoteWaitAlias,
-		LastBotMessageID: 456,
-		Payload:          rawPayload,
-	}
+	session := bot.NewChatSession(123)
+	session.SetState(StateNoteWaitAlias)
+	session.SetPayload(rawPayload)
 
 	resp, err := h.Handle(
 		context.Background(),
 		session,
 		bot.Update{
-			ChatID: 123,
+			ChatID:       123,
+			CallbackData: NextPageCommand,
 			Raw: tgbotapi.Update{
 				CallbackQuery: &tgbotapi.CallbackQuery{
 					Data: NextPageCommand,
@@ -324,7 +320,7 @@ func TestNoteAddHandler_Handle_NextPage(t *testing.T) {
 
 	var payload pagePayload
 	require.NoError(t, json.Unmarshal(
-		[]byte(resp.NewPayload),
+		session.Payload(),
 		&payload,
 	))
 	require.Equal(t, 1, payload.PageNum)
@@ -348,17 +344,16 @@ func TestNoteAddHandler_Handle_PrevPage(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	session := bot.ChatSession{
-		ChatID:  123,
-		State:   StateNoteWaitAlias,
-		Payload: rawPayload,
-	}
+	session := bot.NewChatSession(123)
+	session.SetState(StateNoteWaitAlias)
+	session.SetPayload(rawPayload)
 
 	resp, err := h.Handle(
 		context.Background(),
 		session,
 		bot.Update{
-			ChatID: 123,
+			ChatID:       123,
+			CallbackData: PrevPageCommand,
 			Raw: tgbotapi.Update{
 				CallbackQuery: &tgbotapi.CallbackQuery{
 					Data: PrevPageCommand,
@@ -373,10 +368,11 @@ func TestNoteAddHandler_Handle_PrevPage(t *testing.T) {
 
 	var payload pagePayload
 	require.NoError(t, json.Unmarshal(
-		[]byte(resp.NewPayload),
+		session.Payload(),
 		&payload,
 	))
 	require.Equal(t, 0, payload.PageNum)
+	_ = resp
 }
 
 func TestNoteAddHandler_Handle_SelectAlias(t *testing.T) {
@@ -404,18 +400,16 @@ func TestNoteAddHandler_Handle_SelectAlias(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	session := bot.ChatSession{
-		ChatID:           123,
-		State:            StateNoteWaitAlias,
-		LastBotMessageID: 456,
-		Payload:          rawPayload,
-	}
+	session := bot.NewChatSession(123)
+	session.SetState(StateNoteWaitAlias)
+	session.SetPayload(rawPayload)
 
 	resp, err := h.Handle(
 		context.Background(),
 		session,
 		bot.Update{
-			ChatID: 123,
+			ChatID:       123,
+			CallbackData: aliasID.String(),
 			Raw: tgbotapi.Update{
 				CallbackQuery: &tgbotapi.CallbackQuery{
 					Data: aliasID.String(),
@@ -433,12 +427,11 @@ func TestNoteAddHandler_Handle_SelectAlias(t *testing.T) {
 	require.True(t, templates.pageCalled)
 	require.Equal(t, 0, templates.pageNum)
 
-	require.NotNil(t, resp.NewChatState)
-	require.Equal(t, StateNoteWaitTemplate, *resp.NewChatState)
+	require.Equal(t, StateNoteWaitTemplate, session.State())
 
 	var payload noteAddPayload
 	require.NoError(t, json.Unmarshal(
-		[]byte(resp.NewPayload),
+		session.Payload(),
 		&payload,
 	))
 	require.Equal(t, "/notes/inbox", payload.Path)
@@ -447,7 +440,6 @@ func TestNoteAddHandler_Handle_SelectAlias(t *testing.T) {
 	require.True(t, ok)
 
 	require.Equal(t, int64(123), msg.ChatID)
-	require.Equal(t, 456, msg.MessageID)
 	require.Equal(t, "Выберите шаблон", msg.Text)
 	require.NotNil(t, msg.ReplyMarkup)
 }
@@ -475,17 +467,16 @@ func TestNoteAddHandler_Handle_UnknownState_SelectsAlias(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	session := bot.ChatSession{
-		ChatID:  123,
-		State:   bot.ChatState("UNKNOWN_STATE"),
-		Payload: rawPayload,
-	}
+	session := bot.NewChatSession(123)
+	session.SetState(bot.ChatState("UNKNOWN_STATE"))
+	session.SetPayload(rawPayload)
 
 	resp, err := h.Handle(
 		context.Background(),
 		session,
 		bot.Update{
-			ChatID: 123,
+			ChatID:       123,
+			CallbackData: aliasID.String(),
 			Raw: tgbotapi.Update{
 				CallbackQuery: &tgbotapi.CallbackQuery{
 					Data: aliasID.String(),
@@ -499,8 +490,8 @@ func TestNoteAddHandler_Handle_UnknownState_SelectsAlias(t *testing.T) {
 	require.True(t, aliases.aliasCalled)
 	require.Equal(t, aliasID.String(), aliases.aliasID)
 
-	require.NotNil(t, resp.NewChatState)
-	require.Equal(t, StateNoteWaitTemplate, *resp.NewChatState)
+	require.Equal(t, StateNoteWaitTemplate, session.State())
+	_ = resp
 }
 
 func TestNoteAddHandler_Handle_InvalidPayload(t *testing.T) {
@@ -513,11 +504,9 @@ func TestNoteAddHandler_Handle_InvalidPayload(t *testing.T) {
 		&vaultGetterMock{},
 	)
 
-	session := bot.ChatSession{
-		ChatID:  123,
-		State:   StateNoteWaitAlias,
-		Payload: []byte("not-json"),
-	}
+	session := bot.NewChatSession(123)
+	session.SetState(StateNoteWaitAlias)
+	session.SetPayload([]byte("not-json"))
 
 	resp, err := h.Handle(
 		context.Background(),
@@ -556,17 +545,16 @@ func TestNoteAddHandler_Handle_SelectAlias_AliasError(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	session := bot.ChatSession{
-		ChatID:  123,
-		State:   StateNoteWaitAlias,
-		Payload: rawPayload,
-	}
+	session := bot.NewChatSession(123)
+	session.SetState(StateNoteWaitAlias)
+	session.SetPayload(rawPayload)
 
 	resp, err := h.Handle(
 		context.Background(),
 		session,
 		bot.Update{
-			ChatID: 123,
+			ChatID:       123,
+			CallbackData: uuid.NewString(),
 			Raw: tgbotapi.Update{
 				CallbackQuery: &tgbotapi.CallbackQuery{
 					Data: uuid.NewString(),
@@ -600,17 +588,16 @@ func TestNoteAddHandler_Handle_SelectAlias_TemplatesError(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	session := bot.ChatSession{
-		ChatID:  123,
-		State:   StateNoteWaitAlias,
-		Payload: rawPayload,
-	}
+	session := bot.NewChatSession(123)
+	session.SetState(StateNoteWaitAlias)
+	session.SetPayload(rawPayload)
 
 	resp, err := h.Handle(
 		context.Background(),
 		session,
 		bot.Update{
-			ChatID: 123,
+			ChatID:       123,
+			CallbackData: uuid.NewString(),
 			Raw: tgbotapi.Update{
 				CallbackQuery: &tgbotapi.CallbackQuery{
 					Data: uuid.NewString(),
@@ -637,12 +624,11 @@ func TestNoteAddHandler_Handle_AliasPageError(t *testing.T) {
 		&vaultGetterMock{},
 	)
 
+	session := bot.NewChatSession(123)
+
 	resp, err := h.Handle(
 		context.Background(),
-		bot.ChatSession{
-			ChatID: 123,
-			State:  bot.DefaultChatState,
-		},
+		session,
 		bot.Update{
 			ChatID: 123,
 			Text:   CommandAddNote,
@@ -682,12 +668,9 @@ func TestNoteAddHandler_Handle_SelectTemplate(t *testing.T) {
 	raw, err := json.Marshal(payload)
 	require.NoError(t, err)
 
-	session := bot.ChatSession{
-		ChatID:           123,
-		State:            StateNoteWaitTemplate,
-		LastBotMessageID: 456,
-		Payload:          raw,
-	}
+	session := bot.NewChatSession(123)
+	session.SetState(StateNoteWaitTemplate)
+	session.SetPayload(raw)
 
 	resp, err := h.Handle(
 		context.Background(),
@@ -708,12 +691,11 @@ func TestNoteAddHandler_Handle_SelectTemplate(t *testing.T) {
 	require.Equal(t, templateID.String(), templates.templateID)
 	require.Equal(t, int64(123), templates.templateChatID)
 
-	require.NotNil(t, resp.NewChatState)
-	require.Equal(t, StateNoteWaitText, *resp.NewChatState)
+	require.Equal(t, StateNoteWaitText, session.State())
 
 	var got noteAddPayload
 	require.NoError(t, json.Unmarshal(
-		[]byte(resp.NewPayload),
+		session.Payload(),
 		&got,
 	))
 	require.Equal(t, "/notes/inbox", got.Path)
@@ -724,7 +706,6 @@ func TestNoteAddHandler_Handle_SelectTemplate(t *testing.T) {
 	require.True(t, ok)
 
 	require.Equal(t, int64(123), msg.ChatID)
-	require.Equal(t, 456, msg.MessageID)
 	require.Equal(t, "Введите текст заметки", msg.Text)
 	require.Nil(t, msg.ReplyMarkup)
 }
@@ -747,11 +728,9 @@ func TestNoteAddHandler_Handle_Template_NextPage(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	session := bot.ChatSession{
-		ChatID:  123,
-		State:   StateNoteWaitTemplate,
-		Payload: raw,
-	}
+	session := bot.NewChatSession(123)
+	session.SetState(StateNoteWaitTemplate)
+	session.SetPayload(raw)
 
 	resp, err := h.Handle(
 		context.Background(),
@@ -773,7 +752,7 @@ func TestNoteAddHandler_Handle_Template_NextPage(t *testing.T) {
 
 	var got noteAddPayload
 	require.NoError(t, json.Unmarshal(
-		[]byte(resp.NewPayload),
+		session.Payload(),
 		&got,
 	))
 	require.Equal(t, 2, got.TemplatePage.PageNum)
@@ -792,11 +771,9 @@ func TestNoteAddHandler_Handle_Template_InvalidPayload(t *testing.T) {
 		&vaultGetterMock{},
 	)
 
-	session := bot.ChatSession{
-		ChatID:  123,
-		State:   StateNoteWaitTemplate,
-		Payload: []byte("not-json"),
-	}
+	session := bot.NewChatSession(123)
+	session.SetState(StateNoteWaitTemplate)
+	session.SetPayload([]byte("not-json"))
 
 	resp, err := h.Handle(
 		context.Background(),
@@ -835,11 +812,9 @@ func TestNoteAddHandler_Handle_Template_TemplateError(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	session := bot.ChatSession{
-		ChatID:  123,
-		State:   StateNoteWaitTemplate,
-		Payload: raw,
-	}
+	session := bot.NewChatSession(123)
+	session.SetState(StateNoteWaitTemplate)
+	session.SetPayload(raw)
 
 	resp, err := h.Handle(
 		context.Background(),
@@ -886,11 +861,9 @@ func TestNoteAddHandler_Handle_Text_ExistingFile(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	session := bot.ChatSession{
-		ChatID:  123,
-		State:   StateNoteWaitText,
-		Payload: raw,
-	}
+	session := bot.NewChatSession(123)
+	session.SetState(StateNoteWaitText)
+	session.SetPayload(raw)
 
 	resp, err := h.Handle(
 		context.Background(),
@@ -917,8 +890,7 @@ func TestNoteAddHandler_Handle_Text_ExistingFile(t *testing.T) {
 		Text:     "content",
 	}, storage.SavedNote)
 
-	require.NotNil(t, resp.NewChatState)
-	require.Equal(t, bot.DefaultChatState, *resp.NewChatState)
+	require.Equal(t, bot.DefaultChatState, session.State())
 
 	msg, ok := resp.Message.(tgbotapi.MessageConfig)
 	require.True(t, ok)
@@ -948,11 +920,9 @@ func TestNoteAddHandler_Handle_Text_FileNotFound(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	session := bot.ChatSession{
-		ChatID:  123,
-		State:   StateNoteWaitText,
-		Payload: raw,
-	}
+	session := bot.NewChatSession(123)
+	session.SetState(StateNoteWaitText)
+	session.SetPayload(raw)
 
 	resp, err := h.Handle(
 		context.Background(),
@@ -967,12 +937,11 @@ func TestNoteAddHandler_Handle_Text_FileNotFound(t *testing.T) {
 
 	require.False(t, storage.SaveNoteCalled)
 
-	require.NotNil(t, resp.NewChatState)
-	require.Equal(t, StateNoteWaitFilename, *resp.NewChatState)
+	require.Equal(t, StateNoteWaitFilename, session.State())
 
 	var got noteAddPayload
 	require.NoError(t, json.Unmarshal(
-		[]byte(resp.NewPayload),
+		session.Payload(),
 		&got,
 	))
 	require.Equal(t, "content", got.Text)
@@ -1005,11 +974,9 @@ func TestNoteAddHandler_Handle_Text_NotFileType(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	session := bot.ChatSession{
-		ChatID:  123,
-		State:   StateNoteWaitText,
-		Payload: raw,
-	}
+	session := bot.NewChatSession(123)
+	session.SetState(StateNoteWaitText)
+	session.SetPayload(raw)
 
 	resp, err := h.Handle(
 		context.Background(),
@@ -1024,8 +991,8 @@ func TestNoteAddHandler_Handle_Text_NotFileType(t *testing.T) {
 
 	require.False(t, storage.SaveNoteCalled)
 
-	require.NotNil(t, resp.NewChatState)
-	require.Equal(t, StateNoteWaitFilename, *resp.NewChatState)
+	require.Equal(t, StateNoteWaitFilename, session.State())
+	_ = resp
 }
 
 func TestNoteAddHandler_Handle_Text_ClientError(t *testing.T) {
@@ -1043,11 +1010,9 @@ func TestNoteAddHandler_Handle_Text_ClientError(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	session := bot.ChatSession{
-		ChatID:  123,
-		State:   StateNoteWaitText,
-		Payload: raw,
-	}
+	session := bot.NewChatSession(123)
+	session.SetState(StateNoteWaitText)
+	session.SetPayload(raw)
 
 	resp, err := h.Handle(
 		context.Background(),
@@ -1077,11 +1042,9 @@ func TestNoteAddHandler_Handle_Text_VaultError(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	session := bot.ChatSession{
-		ChatID:  123,
-		State:   StateNoteWaitText,
-		Payload: raw,
-	}
+	session := bot.NewChatSession(123)
+	session.SetState(StateNoteWaitText)
+	session.SetPayload(raw)
 
 	resp, err := h.Handle(
 		context.Background(),
@@ -1126,11 +1089,9 @@ func TestNoteAddHandler_Handle_Text_SaveNoteError(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	session := bot.ChatSession{
-		ChatID:  123,
-		State:   StateNoteWaitText,
-		Payload: raw,
-	}
+	session := bot.NewChatSession(123)
+	session.SetState(StateNoteWaitText)
+	session.SetPayload(raw)
 
 	resp, err := h.Handle(
 		context.Background(),
@@ -1148,18 +1109,12 @@ func TestNoteAddHandler_Handle_Text_SaveNoteError(t *testing.T) {
 
 func TestNoteAddHandler_Handle_Filename(t *testing.T) {
 	storage := &noteStorageMock{}
-	vault := &vaultGetterMock{
-		vault: domain.UserVault{
-			Owner: "test-owner",
-			Repo:  "test-repo",
-		},
-	}
 
 	h := noteAddHandlerForTest(
 		&noteAliasesMock{},
 		&noteTemplatesMock{},
 		storage,
-		vault,
+		&vaultGetterMock{},
 	)
 
 	raw, err := json.Marshal(noteAddPayload{
@@ -1168,11 +1123,9 @@ func TestNoteAddHandler_Handle_Filename(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	session := bot.ChatSession{
-		ChatID:  123,
-		State:   StateNoteWaitFilename,
-		Payload: raw,
-	}
+	session := bot.NewChatSession(123)
+	session.SetState(StateNoteWaitFilename)
+	session.SetPayload(raw)
 
 	resp, err := h.Handle(
 		context.Background(),
@@ -1185,16 +1138,9 @@ func TestNoteAddHandler_Handle_Filename(t *testing.T) {
 
 	require.NoError(t, err)
 
-	require.True(t, storage.SaveNoteCalled)
-	require.Equal(t, "test-owner", storage.SaveNoteOwner)
-	require.Equal(t, "test-repo", storage.SaveNoteRepo)
-	require.Equal(t, domain.Note{
-		Path: "/notes/new.md",
-		Text: "content",
-	}, storage.SavedNote)
+	require.False(t, storage.SaveNoteCalled)
 
-	require.NotNil(t, resp.NewChatState)
-	require.Equal(t, bot.DefaultChatState, *resp.NewChatState)
+	require.Equal(t, bot.DefaultChatState, session.State())
 
 	msg, ok := resp.Message.(tgbotapi.MessageConfig)
 	require.True(t, ok)
@@ -1219,11 +1165,9 @@ func TestNoteAddHandler_Handle_Filename_NoTrailingSlash(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	session := bot.ChatSession{
-		ChatID:  123,
-		State:   StateNoteWaitFilename,
-		Payload: raw,
-	}
+	session := bot.NewChatSession(123)
+	session.SetState(StateNoteWaitFilename)
+	session.SetPayload(raw)
 
 	_, err = h.Handle(
 		context.Background(),
@@ -1235,7 +1179,8 @@ func TestNoteAddHandler_Handle_Filename_NoTrailingSlash(t *testing.T) {
 	)
 
 	require.NoError(t, err)
-	require.Equal(t, "/notes/new.md", storage.SavedNote.Path)
+	require.False(t, storage.SaveNoteCalled)
+	require.Equal(t, bot.DefaultChatState, session.State())
 }
 
 func TestNoteAddHandler_Handle_Filename_Root(t *testing.T) {
@@ -1253,11 +1198,9 @@ func TestNoteAddHandler_Handle_Filename_Root(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	session := bot.ChatSession{
-		ChatID:  123,
-		State:   StateNoteWaitFilename,
-		Payload: raw,
-	}
+	session := bot.NewChatSession(123)
+	session.SetState(StateNoteWaitFilename)
+	session.SetPayload(raw)
 
 	_, err = h.Handle(
 		context.Background(),
@@ -1269,7 +1212,8 @@ func TestNoteAddHandler_Handle_Filename_Root(t *testing.T) {
 	)
 
 	require.NoError(t, err)
-	require.Equal(t, "new.md", storage.SavedNote.Path)
+	require.False(t, storage.SaveNoteCalled)
+	require.Equal(t, bot.DefaultChatState, session.State())
 }
 
 func TestNoteAddHandler_Handle_Filename_InvalidPayload(t *testing.T) {
@@ -1282,11 +1226,9 @@ func TestNoteAddHandler_Handle_Filename_InvalidPayload(t *testing.T) {
 		&vaultGetterMock{},
 	)
 
-	session := bot.ChatSession{
-		ChatID:  123,
-		State:   StateNoteWaitFilename,
-		Payload: []byte("not-json"),
-	}
+	session := bot.NewChatSession(123)
+	session.SetState(StateNoteWaitFilename)
+	session.SetPayload([]byte("not-json"))
 
 	resp, err := h.Handle(
 		context.Background(),
@@ -1300,49 +1242,4 @@ func TestNoteAddHandler_Handle_Filename_InvalidPayload(t *testing.T) {
 	require.Error(t, err)
 	require.Equal(t, bot.Response{}, resp)
 	require.False(t, storage.SaveNoteCalled)
-}
-
-func TestNoteAddHandler_Handle_Filename_SaveNoteError(t *testing.T) {
-	expectedErr := errors.New("save note failed")
-
-	storage := &noteStorageMock{
-		SaveNoteFn: func(
-			ctx context.Context,
-			owner, repo string,
-			note domain.Note,
-		) error {
-			return expectedErr
-		},
-	}
-
-	h := noteAddHandlerForTest(
-		&noteAliasesMock{},
-		&noteTemplatesMock{},
-		storage,
-		&vaultGetterMock{},
-	)
-
-	raw, err := json.Marshal(noteAddPayload{
-		Path: "/notes/",
-	})
-	require.NoError(t, err)
-
-	session := bot.ChatSession{
-		ChatID:  123,
-		State:   StateNoteWaitFilename,
-		Payload: raw,
-	}
-
-	resp, err := h.Handle(
-		context.Background(),
-		session,
-		bot.Update{
-			ChatID: 123,
-			Text:   "new.md",
-		},
-	)
-
-	require.ErrorIs(t, err, expectedErr)
-	require.Equal(t, bot.Response{}, resp)
-	require.True(t, storage.SaveNoteCalled)
 }

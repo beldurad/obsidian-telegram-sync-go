@@ -1,15 +1,20 @@
 package telegram
 
-import tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+import (
+	"fmt"
+
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+)
 
 type Client struct {
 	bot *tgbotapi.BotAPI
 }
 
 func New(token string) (*Client, error) {
+	const op = "telegram.New"
 	bot, err := tgbotapi.NewBotAPI(token)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%v: creating bot api client: %w", op, err)
 	}
 	return &Client{
 		bot: bot,
