@@ -201,7 +201,7 @@ func TestRepoSetHandler_Handle_NextPage(t *testing.T) {
 		bot.Update{
 			Raw: tgbotapi.Update{
 				CallbackQuery: &tgbotapi.CallbackQuery{
-					Data: NextPageCommand,
+					Data: NextPageCallback,
 				},
 			},
 		},
@@ -252,7 +252,7 @@ func TestRepoSetHandler_Handle_PrevPage(t *testing.T) {
 		bot.Update{
 			Raw: tgbotapi.Update{
 				CallbackQuery: &tgbotapi.CallbackQuery{
-					Data: PrevPageCommand,
+					Data: PrevPageCallback,
 				},
 			},
 		},

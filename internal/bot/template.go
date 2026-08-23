@@ -14,18 +14,18 @@ import (
 
 // ===== STATES =====
 
-var StateGetTemplate bot.ChatState = "TEMPLATE_GET"
+const StateGetTemplate = "TEMPLATE_GET"
 
-var (
-	StateWaitTemplateValue = bot.ChatState("WAITING_TEMPLATE_VALUE")
-	StateWaitTemplateName  = bot.ChatState("WAITING_TEMPLATE_NAME")
+const (
+	StateWaitTemplateValue = "WAITING_TEMPLATE_VALUE"
+	StateWaitTemplateName  = "WAITING_TEMPLATE_NAME"
 )
 
 // ===== COMMANDS =====
 
 const (
 	CommandGetTemplates = "/template"
-	CommandAddTemplate  = "/add-template"
+	CommandAddTemplate  = "/add_template"
 )
 
 // ===== GET TEMPLATE =====
@@ -47,7 +47,11 @@ func NewGetTemplateHandler(getter TemplateGetter) *GetTemplateHandler {
 }
 
 func (h *GetTemplateHandler) Match(ctx context.Context, s *bot.ChatSession, u bot.Update) bool {
-	return u.Text == CommandGetTemplates || s.State() == StateGetTemplate
+	if u.Text == CommandGetTemplates {
+		s.ToDefault()
+		return true
+	}
+	return s.State() == StateGetTemplate && u.CallbackData != ""
 }
 
 func (h *GetTemplateHandler) Handle(ctx context.Context, s *bot.ChatSession, u bot.Update) (resp bot.Response, err error) {
@@ -64,16 +68,16 @@ func (h *GetTemplateHandler) Handle(ctx context.Context, s *bot.ChatSession, u b
 
 	var payload pagePayload
 
-	if state != bot.DefaultChatState {
+	if state == StateGetTemplate {
 		raw := s.Payload()
 		err := json.Unmarshal(raw, &payload)
 		if err != nil {
 			return bot.Response{}, fmt.Errorf("%v: unmarshaling payload: %w", op, err)
 		}
 		switch u.Raw.CallbackData() {
-		case NextPageCommand:
+		case NextPageCallback:
 			payload.PageNum++
-		case PrevPageCommand:
+		case PrevPageCallback:
 			payload.PageNum--
 		}
 	}
@@ -111,11 +115,17 @@ func (h *GetTemplateHandler) Handle(ctx context.Context, s *bot.ChatSession, u b
 	}
 
 	buttons := tgbotapi.NewInlineKeyboardRow()
-	if templatesPage.HasNext() {
-		buttons = append(buttons, tgbotapi.NewInlineKeyboardButtonData("Next", NextPageCommand))
-	}
 	if templatesPage.HasPrev() {
-		buttons = append(buttons, tgbotapi.NewInlineKeyboardButtonData("Prev", PrevPageCommand))
+		buttons = append(
+			buttons,
+			tgbotapi.NewInlineKeyboardButtonData(PrevPageButtonText, PrevPageCallback),
+		)
+	}
+	if templatesPage.HasNext() {
+		buttons = append(
+			buttons,
+			tgbotapi.NewInlineKeyboardButtonData(NextPageButtonText, NextPageCallback),
+		)
 	}
 
 	replyMarkup := tgbotapi.NewInlineKeyboardMarkup(
@@ -124,7 +134,7 @@ func (h *GetTemplateHandler) Handle(ctx context.Context, s *bot.ChatSession, u b
 
 	var c tgbotapi.Chattable
 
-	if state == bot.DefaultChatState || !s.EditMsgAvailable() {
+	if state != StateGetTemplate || !s.EditMsgAvailable() {
 		msgCfg := tgbotapi.NewMessage(chatID, string(textBuilder))
 		msgCfg.ReplyMarkup = replyMarkup
 		c = msgCfg
@@ -199,9 +209,12 @@ func (p templateBuilder) toTemplate() (domain.Template, error) {
 }
 
 func (a *TemplateAddHandler) Match(ctx context.Context, s *bot.ChatSession, u bot.Update) bool {
-	return u.Text == CommandAddTemplate ||
-		s.State() == StateWaitTemplateValue ||
-		s.State() == StateWaitTemplateName
+	if u.Text == CommandAddTemplate {
+		s.ToDefault()
+		return true
+	}
+	return (s.State() == StateWaitTemplateValue && u.Text != "") ||
+		(s.State() == StateWaitTemplateName && u.Text != "")
 }
 
 func (a *TemplateAddHandler) Handle(ctx context.Context, s *bot.ChatSession, u bot.Update) (resp bot.Response, err error) {
@@ -216,11 +229,12 @@ func (a *TemplateAddHandler) Handle(ctx context.Context, s *bot.ChatSession, u b
 	chatID := u.ChatID
 	state := s.State()
 
-	if state == StateWaitTemplateValue {
+	switch state {
+	case StateWaitTemplateValue:
 		resp, err = a.handleValue(chatID, u.Text, s)
-	} else if state == StateWaitTemplateName {
+	case StateWaitTemplateName:
 		resp, err = a.handleName(ctx, chatID, u.Text, s)
-	} else {
+	default:
 		resp, err = a.handleDefault(s, u)
 	}
 

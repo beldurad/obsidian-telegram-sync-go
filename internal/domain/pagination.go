@@ -15,7 +15,7 @@ func (p Page[T]) HasNext() bool {
 	if p.CurPage < 0 {
 		return false
 	}
-	return p.CurPage < p.TotalPages
+	return p.CurPage < p.TotalPages-1
 }
 
 func (p Page[T]) HasPrev() bool {

@@ -276,7 +276,7 @@ func (b *Bot) handle(ctx context.Context, u tgbotapi.Update) {
 
 	handler := b.handler(ctx, session, update)
 	if handler == nil {
-		log.Debug("no suitable handler found")
+		log.Debug("no suitable handler found", "session", *session)
 		return
 	}
 
@@ -287,7 +287,7 @@ func (b *Bot) handle(ctx context.Context, u tgbotapi.Update) {
 		resp = b.errHandle(ctx, session, update, err)
 	}
 
-	_, err = b.tgBot.Send(resp.Message)
+	msg, err := b.tgBot.Send(resp.Message)
 
 	// If an error occurs while sending a response, the program does not save the new session state.
 	if err != nil {
@@ -295,6 +295,7 @@ func (b *Bot) handle(ctx context.Context, u tgbotapi.Update) {
 		return
 	}
 
+	session.lastBotMessageID = msg.MessageID
 	err = b.sessionService.UpdateSession(session)
 	if err != nil {
 		log.Error("error while updating session", "error", err)

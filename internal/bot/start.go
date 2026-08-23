@@ -18,8 +18,8 @@ var mainMenu = fmt.Sprintf("%s - Вывод всех команд\n", CommandSta
 	fmt.Sprintf("%s - Создать новый текстовый шаблон\n", CommandAddTemplate) +
 	fmt.Sprintf("%s - Создать заметку\n", CommandAddNote)
 
-var CommandMenu bot.Command = "/menu"
-var CommandStart bot.Command = "/start"
+const CommandMenu = "/menu"
+const CommandStart = "/start"
 
 type StartHandler struct{}
 
@@ -34,7 +34,7 @@ func (h *StartHandler) Handle(ctx context.Context, s *bot.ChatSession, u bot.Upd
 }
 
 func (h *StartHandler) Match(ctx context.Context, s *bot.ChatSession, u bot.Update) bool {
-	return u.Text == string(CommandStart) || u.Text == string(CommandMenu)
+	return u.Text == CommandStart || u.Text == CommandMenu
 }
 
 var _ bot.Handler = &StartHandler{}

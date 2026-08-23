@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/url"
+	"path"
 
 	"github.com/beldurad/obsidian-telegram-sync-go/foundation/bot"
 	"github.com/beldurad/obsidian-telegram-sync-go/internal/domain"
@@ -15,22 +15,25 @@ import (
 
 // ===== STATES =====
 
-var StateGetAlias bot.ChatState = "ALIAS_GET"
+const StateGetAlias = "ALIAS_GET"
 
-var (
-	StateWaitPath  = bot.ChatState("WAITING_PATH")
-	StateWaitAlias = bot.ChatState("WAITING_ALIAS")
+const (
+	StateWaitPath  = "WAITING_PATH"
+	StateWaitAlias = "WAITING_ALIAS"
 )
 
 // ===== COMMANDS =====
 
-var (
-	CommandGetAliases = bot.Command("/alias")
+const (
+	CommandGetAliases = "/alias"
 
-	CommandAddAlias = bot.Command("/add-alias")
+	CommandAddAlias = "/add_alias"
 
-	prevPathCommand   = bot.Command("..")
-	currentDirCommand = bot.Command("*")
+	prevPathCallback   = ".."
+	prevPathButtonText = ".."
+
+	currentDirCallback   = "*"
+	currentDirButtonText = "Выбрать текущую директорию как путь"
 )
 
 // ===== GET ALIASES =====
@@ -52,8 +55,11 @@ func NewGetAliasesHandler(getter AliasesGetter) *GetAliasesHandler {
 var _ bot.Handler = &GetAliasesHandler{}
 
 func (h *GetAliasesHandler) Match(ctx context.Context, s *bot.ChatSession, u bot.Update) bool {
-	return u.Text == string(CommandGetAliases) ||
-		s.State() == StateGetAlias
+	if u.Text == CommandGetAliases {
+		s.ToDefault()
+		return true
+	}
+	return s.State() == StateGetAlias && u.CallbackData != ""
 }
 
 func (h *GetAliasesHandler) Handle(ctx context.Context, s *bot.ChatSession, u bot.Update) (bot.Response, error) {
@@ -62,16 +68,16 @@ func (h *GetAliasesHandler) Handle(ctx context.Context, s *bot.ChatSession, u bo
 	state := s.State()
 	payload := pagePayload{}
 
-	if state != bot.DefaultChatState {
+	if state == StateGetAlias {
 		raw := s.Payload()
 		err := json.Unmarshal(raw, &payload)
 		if err != nil {
 			return bot.Response{}, fmt.Errorf("%v: payload unmarshaling: %w", op, err)
 		}
-		switch u.Text {
-		case NextPageCommand:
+		switch u.CallbackData {
+		case NextPageCallback:
 			payload.PageNum++
-		case PrevPageCommand:
+		case PrevPageCallback:
 			payload.PageNum = max(0, payload.PageNum-1)
 		}
 	}
@@ -102,19 +108,19 @@ func (h *GetAliasesHandler) Handle(ctx context.Context, s *bot.ChatSession, u bo
 
 	if len(aliasesPage.Values) == 0 {
 		textBuilder = append(textBuilder,
-			[]rune(
+			[]rune(fmt.Sprintf(
 				`
-			У вас нет алиасов. Создайте свой первый алиас с помощью /add-alias
+			У вас нет алиасов. Создайте свой первый алиас с помощью %s
 			`,
-			)...)
+				CommandAddAlias))...)
 	}
 
 	buttons := tgbotapi.NewInlineKeyboardRow()
-	if aliasesPage.HasNext() {
-		buttons = append(buttons, tgbotapi.NewInlineKeyboardButtonData("Next", NextPageCommand))
-	}
 	if aliasesPage.HasPrev() {
-		buttons = append(buttons, tgbotapi.NewInlineKeyboardButtonData("Prev", PrevPageCommand))
+		buttons = append(buttons, tgbotapi.NewInlineKeyboardButtonData(PrevPageButtonText, PrevPageCallback))
+	}
+	if aliasesPage.HasNext() {
+		buttons = append(buttons, tgbotapi.NewInlineKeyboardButtonData(NextPageButtonText, NextPageCallback))
 	}
 
 	replyMarkup := tgbotapi.NewInlineKeyboardMarkup(
@@ -123,7 +129,7 @@ func (h *GetAliasesHandler) Handle(ctx context.Context, s *bot.ChatSession, u bo
 
 	var c tgbotapi.Chattable
 
-	if state == bot.DefaultChatState || s.LastBotMessageID() == 0 {
+	if state != StateGetAlias || s.LastBotMessageID() == 0 {
 		msgCfg := tgbotapi.NewMessage(u.ChatID, string(textBuilder))
 		msgCfg.ReplyMarkup = replyMarkup
 		c = msgCfg
@@ -187,9 +193,12 @@ func NewAddAliasHandler(vaultGetter UserVaultGetter, clientGetter ClientGetter, 
 var _ bot.Handler = &AddAliasHandler{}
 
 func (a *AddAliasHandler) Match(ctx context.Context, s *bot.ChatSession, u bot.Update) bool {
-	return u.Text == string(CommandAddAlias) ||
-		s.State() == StateWaitPath ||
-		s.State() == StateWaitAlias
+	if u.Text == CommandAddAlias {
+		s.ToDefault()
+		return true
+	}
+	return (s.State() == StateWaitPath && u.CallbackData != "") ||
+		(s.State() == StateWaitAlias && u.Text != "")
 }
 
 func (a *AddAliasHandler) Handle(ctx context.Context, s *bot.ChatSession, u bot.Update) (resp bot.Response, err error) {
@@ -207,7 +216,7 @@ func (a *AddAliasHandler) Handle(ctx context.Context, s *bot.ChatSession, u bot.
 	case StateWaitAlias:
 		resp, err = a.handleAliasSet(ctx, s, u)
 	default:
-		resp, err = bot.Response{}, ErrCantHandle
+		resp, err = a.handlePathSet(ctx, s, u)
 	}
 
 	if err != nil {
@@ -228,7 +237,7 @@ func newAliasBuilder(chatID int64) aliasBuilder {
 	return aliasBuilder{
 		ID:     uuid.NewString(),
 		ChatID: chatID,
-		Type:   domain.TypeFile,
+		Type:   domain.PathTypeFile,
 	}
 }
 
@@ -240,8 +249,11 @@ func (a aliasBuilder) toAlias() (domain.Alias, error) {
 	return domain.Alias{
 		ID:     id,
 		ChatID: a.ChatID,
-		Path:   a.Path,
-		Alias:  a.Alias,
+		Path: domain.Path{
+			Value: a.Path,
+			Type:  a.Type,
+		},
+		Alias: a.Alias,
 	}, nil
 }
 
@@ -257,17 +269,24 @@ func (a *AddAliasHandler) handlePathSet(ctx context.Context, s *bot.ChatSession,
 		return bot.Response{}, fmt.Errorf("%v: getting vault: %w", op, err)
 	}
 	payload := newPathChoosingPayload()
-	if s.State() != bot.DefaultChatState {
+	if s.State() == StateWaitPath {
 		raw := s.Payload()
 		if err := json.Unmarshal(raw, &payload); err != nil {
 			return bot.Response{}, fmt.Errorf("%v: unmarshaling payload: %w", op, err)
 		}
 	}
-	if u.Text == string(currentDirCommand) {
+	switch u.CallbackData {
+	case NextPageCallback:
+		payload.PageNum++
+	case PrevPageCallback:
+		payload.PageNum = max(0, payload.PageNum-1)
+	}
+
+	if u.CallbackData == currentDirCallback {
 		msgCfg := tgbotapi.NewEditMessageText(u.ChatID, s.LastBotMessageID(), "Введите алиас для пути")
 		builder := newAliasBuilder(u.ChatID)
 		builder.Path = payload.CurPath
-		builder.Type = domain.TypeDir
+		builder.Type = domain.PathTypeDir
 		bytes, err := json.Marshal(builder)
 		if err != nil {
 			return bot.Response{}, fmt.Errorf("%v: marshaling builder: %w", op, err)
@@ -278,12 +297,12 @@ func (a *AddAliasHandler) handlePathSet(ctx context.Context, s *bot.ChatSession,
 		return bot.Response{
 			Message: msgCfg,
 		}, nil
-	} else if u.Text != NextPageCommand && u.Text != PrevPageCommand {
-		payload.CurPath, err = url.JoinPath(payload.CurPath, u.Text)
+	} else if s.State() == StateWaitPath &&
+		u.CallbackData != NextPageCallback &&
+		u.CallbackData != PrevPageCallback {
+
+		payload.CurPath = path.Join(payload.CurPath, u.CallbackData)
 		payload.PageNum = 0
-		if err != nil {
-			return bot.Response{}, fmt.Errorf("%v: joining path: %w", op, err)
-		}
 	}
 
 	dir, err := client.Directory(
@@ -312,16 +331,24 @@ func (a *AddAliasHandler) handlePathSet(ctx context.Context, s *bot.ChatSession,
 		return bot.Response{}, fmt.Errorf("%v: getting directory contents: %w", op, err)
 	}
 
-	msgCfg := tgbotapi.NewMessage(
-		u.ChatID,
-		`
-		Выберите путь
-		(Файл, если вы хотите использовать алиас для записи в существующий файл)
-		(Директорию, если вы хотите использовать алиас для создания новых файлов в этой директории)
-		`,
-	)
+	textMsg := "Выберите путь\n" +
+		"(Файл, если вы хотите использовать алиас для записи в существующий файл)\n" +
+		"(Директорию, если вы хотите использовать алиас для создания новых файлов в этой директории)"
 
-	msgCfg.ReplyMarkup = pathButtons(dir, payload)
+	var c tgbotapi.Chattable
+
+	switch s.State() {
+	case StateWaitPath:
+		msgCfg := tgbotapi.NewEditMessageText(u.ChatID, s.LastBotMessageID(), textMsg)
+		markup := pathButtons(dir, payload)
+		msgCfg.ReplyMarkup = &markup
+		c = msgCfg
+	default:
+		msgCfg := tgbotapi.NewMessage(u.ChatID, textMsg)
+		msgCfg.ReplyMarkup = pathButtons(dir, payload)
+		c = msgCfg
+	}
+
 	bytes, err := json.Marshal(payload)
 	if err != nil {
 		return bot.Response{}, fmt.Errorf("%v: marshaling payload: %w", op, err)
@@ -330,55 +357,61 @@ func (a *AddAliasHandler) handlePathSet(ctx context.Context, s *bot.ChatSession,
 	s.SetState(StateWaitPath)
 	s.SetPayload(bytes)
 	return bot.Response{
-		Message: msgCfg,
+		Message: c,
 	}, nil
 }
 
-func pathButtons(dirElems domain.Page[domain.DirElem], payload pathChoosingPayload) tgbotapi.InlineKeyboardMarkup {
+func pathButtons(dirElems domain.Page[domain.File], payload pathChoosingPayload) tgbotapi.InlineKeyboardMarkup {
 	buttons := make([][]tgbotapi.InlineKeyboardButton, 0)
 	if !payload.isRootPath() {
 		buttons = append(buttons, []tgbotapi.InlineKeyboardButton{
 			tgbotapi.NewInlineKeyboardButtonData(
-				"..",
-				string(prevPathCommand),
+				prevPathButtonText,
+				prevPathCallback,
 			),
 		})
 	}
 
 	for _, elem := range dirElems.Values {
+		text := elem.Name
+		if elem.Path.Type == domain.PathTypeDir {
+			text += "/"
+		}
 		buttons = append(buttons, []tgbotapi.InlineKeyboardButton{
 			tgbotapi.NewInlineKeyboardButtonData(
-				fmt.Sprintf("%s: %s", elem.Type, elem.Name),
+				text,
 				fmt.Sprintf("/%s", elem.Name),
 			),
 		})
 	}
 	buttons = append(buttons, []tgbotapi.InlineKeyboardButton{
 		tgbotapi.NewInlineKeyboardButtonData(
-			"Выбрать текущую директорию как путь",
-			string(currentDirCommand),
+			currentDirButtonText,
+			currentDirCallback,
 		),
 	})
-	if dirElems.HasNext() {
-		buttons = append(buttons,
-			[]tgbotapi.InlineKeyboardButton{
-				tgbotapi.NewInlineKeyboardButtonData(
-					"Next->",
-					NextPageCommand,
-				),
-			},
-		)
-	}
+
+	paginationRow := tgbotapi.NewInlineKeyboardRow()
 	if dirElems.HasPrev() {
-		buttons = append(buttons,
-			[]tgbotapi.InlineKeyboardButton{
-				tgbotapi.NewInlineKeyboardButtonData(
-					"<-Prev",
-					PrevPageCommand,
-				),
-			},
+		paginationRow = append(paginationRow,
+			tgbotapi.NewInlineKeyboardButtonData(
+				PrevPageButtonText,
+				PrevPageCallback,
+			),
 		)
 	}
+	if dirElems.HasNext() {
+		paginationRow = append(paginationRow,
+			tgbotapi.NewInlineKeyboardButtonData(
+				NextPageButtonText,
+				NextPageCallback,
+			),
+		)
+	}
+	if len(paginationRow) != 0 {
+		buttons = append(buttons, paginationRow)
+	}
+
 	return tgbotapi.InlineKeyboardMarkup{
 		InlineKeyboard: buttons,
 	}
@@ -404,6 +437,6 @@ func (a *AddAliasHandler) handleAliasSet(ctx context.Context, s *bot.ChatSession
 	}
 
 	s.ToDefault()
-	msgCfg := tgbotapi.NewEditMessageText(u.ChatID, s.LastBotMessageID(), "Алиас успешно сохранен")
+	msgCfg := tgbotapi.NewMessage(u.ChatID, "Алиас успешно сохранен")
 	return bot.Response{Message: msgCfg}, nil
 }

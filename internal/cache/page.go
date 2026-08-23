@@ -17,7 +17,7 @@ type PageCountCache struct {
 
 func NewPageCountCache() *PageCountCache {
 	return &PageCountCache{
-		lru: cache.NewLRU[pageCountKey, int](defCap),
+		lru: cache.NewLRU[pageCountKey, int](),
 	}
 }
 

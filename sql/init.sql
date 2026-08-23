@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS alias (
 	id     UUID PRIMARY KEY,
 	chat_id BIGINT NOT NULL,
 	path   TEXT NOT NULL,
+	path_type TEXT NOT NULL,
 	alias  TEXT NOT NULL
 );
 

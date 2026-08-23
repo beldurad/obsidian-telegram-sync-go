@@ -44,11 +44,11 @@ func TestGetAliasesHandler_Handle_FirstPage(t *testing.T) {
 		page: domain.Page[domain.Alias]{
 			Values: []domain.Alias{
 				{
-					Path:  "/foo",
+					Path:  domain.Path{Value: "/foo", Type: domain.PathTypeFile},
 					Alias: "foo",
 				},
 				{
-					Path:  "/bar",
+					Path:  domain.Path{Value: "/bar", Type: domain.PathTypeFile},
 					Alias: "bar",
 				},
 			},
@@ -76,7 +76,7 @@ func TestGetAliasesHandler_Handle_FirstPage(t *testing.T) {
 	require.Equal(t, 0, getter.pageNum)
 	require.Equal(t, domain.DefaultPageSize, getter.pageSize)
 
-	require.Equal(t, StateGetAlias, session.State())
+	require.Equal(t, StateGetAlias, string(session.State()))
 
 	var payload pagePayload
 	require.NoError(t, json.Unmarshal(
@@ -94,11 +94,11 @@ func TestGetAliasesHandler_Handle_FirstPage_SendsNewMessage(t *testing.T) {
 		page: domain.Page[domain.Alias]{
 			Values: []domain.Alias{
 				{
-					Path:  "/foo",
+					Path:  domain.Path{Value: "/foo", Type: domain.PathTypeFile},
 					Alias: "foo",
 				},
 				{
-					Path:  "/bar",
+					Path:  domain.Path{Value: "/bar", Type: domain.PathTypeFile},
 					Alias: "bar",
 				},
 			},
@@ -128,7 +128,10 @@ func TestGetAliasesHandler_Handle_FirstPage_SendsNewMessage(t *testing.T) {
 func TestGetAliasesHandler_Handle_NextPage(t *testing.T) {
 	getter := &aliasesGetterMock{
 		page: domain.Page[domain.Alias]{
-			Values:     []domain.Alias{{Path: "/foo", Alias: "foo"}},
+			Values: []domain.Alias{{
+				Path:  domain.Path{Value: "/foo", Type: domain.PathTypeFile},
+				Alias: "foo",
+			}},
 			TotalPages: 3,
 		},
 	}
@@ -149,8 +152,8 @@ func TestGetAliasesHandler_Handle_NextPage(t *testing.T) {
 	resp, err := h.Handle(ctx,
 		session,
 		bot.Update{
-			ChatID: 123,
-			Text:   NextPageCommand,
+			ChatID:       123,
+			CallbackData: NextPageCallback,
 		})
 
 	require.NoError(t, err)
@@ -165,6 +168,33 @@ func TestGetAliasesHandler_Handle_NextPage(t *testing.T) {
 
 	require.Equal(t, 1, payload.PageNum)
 	_ = resp
+}
+
+func TestGetAliasesHandler_Handle_PrevPage(t *testing.T) {
+	getter := &aliasesGetterMock{}
+
+	h := NewGetAliasesHandler(getter)
+
+	rawPayload, err := json.Marshal(pagePayload{
+		PageNum: 1,
+	})
+	require.NoError(t, err)
+
+	session := bot.NewChatSession(123)
+	session.SetState(StateGetAlias)
+	session.SetPayload(rawPayload)
+
+	ctx := context.Background()
+
+	_, err = h.Handle(ctx,
+		session,
+		bot.Update{
+			ChatID:       123,
+			CallbackData: PrevPageCallback,
+		})
+
+	require.NoError(t, err)
+	require.Equal(t, 0, getter.pageNum)
 }
 
 func TestGetAliasesHandler_Handle_PrevPage_DoesNotGoBelowZero(t *testing.T) {
@@ -186,8 +216,8 @@ func TestGetAliasesHandler_Handle_PrevPage_DoesNotGoBelowZero(t *testing.T) {
 	_, err = h.Handle(ctx,
 		session,
 		bot.Update{
-			ChatID: 123,
-			Text:   PrevPageCommand,
+			ChatID:       123,
+			CallbackData: PrevPageCallback,
 		})
 
 	require.NoError(t, err)
@@ -207,8 +237,8 @@ func TestGetAliasesHandler_Handle_InvalidPayload(t *testing.T) {
 	_, err := h.Handle(ctx,
 		session,
 		bot.Update{
-			ChatID: 123,
-			Text:   NextPageCommand,
+			ChatID:       123,
+			CallbackData: NextPageCallback,
 		})
 
 	require.Error(t, err)
@@ -240,40 +270,40 @@ func TestGetAliasesHandler_Handle_GetterError(t *testing.T) {
 
 func TestGetAliasesHandler_Handle_PaginationButtons(t *testing.T) {
 	tests := []struct {
-		name        string
-		prevPageNum int
-		curPageNum  int
-		totalPages  int
-		command     string
-		wantNext    bool
-		wantPrev    bool
+		name          string
+		beforePageNum int
+		afterPageNum  int
+		totalPages    int
+		command       string
+		wantNext      bool
+		wantPrev      bool
 	}{
 		{
-			name:        "first page",
-			prevPageNum: 1,
-			curPageNum:  0,
-			totalPages:  3,
-			command:     PrevPageCommand,
-			wantNext:    true,
-			wantPrev:    false,
+			name:          "first page",
+			beforePageNum: 1,
+			afterPageNum:  0,
+			totalPages:    3,
+			command:       PrevPageCallback,
+			wantNext:      true,
+			wantPrev:      false,
 		},
 		{
-			name:        "middle page",
-			prevPageNum: 0,
-			curPageNum:  1,
-			totalPages:  3,
-			command:     NextPageCommand,
-			wantNext:    true,
-			wantPrev:    true,
+			name:          "middle page",
+			beforePageNum: 0,
+			afterPageNum:  1,
+			totalPages:    3,
+			command:       NextPageCallback,
+			wantNext:      true,
+			wantPrev:      true,
 		},
 		{
-			name:        "last page",
-			prevPageNum: 1,
-			curPageNum:  2,
-			totalPages:  3,
-			command:     NextPageCommand,
-			wantNext:    false,
-			wantPrev:    true,
+			name:          "last page",
+			beforePageNum: 1,
+			afterPageNum:  2,
+			totalPages:    3,
+			command:       NextPageCallback,
+			wantNext:      false,
+			wantPrev:      true,
 		},
 	}
 
@@ -282,19 +312,22 @@ func TestGetAliasesHandler_Handle_PaginationButtons(t *testing.T) {
 			getter := &aliasesGetterMock{}
 			getter.page = domain.Page[domain.Alias]{
 				TotalPages: tt.totalPages,
-				CurPage:    tt.curPageNum,
+				CurPage:    tt.afterPageNum,
 			}
 			values := []domain.Alias{
 				{
 					ID:     uuid.New(),
 					ChatID: 123,
-					Path:   "path",
-					Alias:  "alias",
+					Path: domain.Path{
+						Value: "/foo",
+						Type:  domain.PathTypeFile,
+					},
+					Alias: "alias",
 				},
 			}
 			getter.page.Values = values
 			rawPayload, err := json.Marshal(pagePayload{
-				PageNum: tt.prevPageNum,
+				PageNum: tt.beforePageNum,
 			})
 			require.NoError(t, err)
 
@@ -309,8 +342,8 @@ func TestGetAliasesHandler_Handle_PaginationButtons(t *testing.T) {
 			resp, err := h.Handle(ctx,
 				session,
 				bot.Update{
-					ChatID: session.ChatID(),
-					Text:   tt.command,
+					ChatID:       session.ChatID(),
+					CallbackData: tt.command,
 				})
 			require.NoError(t, err)
 
@@ -319,9 +352,9 @@ func TestGetAliasesHandler_Handle_PaginationButtons(t *testing.T) {
 			for i := range keyboard {
 				for j := range keyboard[i] {
 					switch *keyboard[i][j].CallbackData {
-					case NextPageCommand:
+					case NextPageCallback:
 						hasNext = true
-					case PrevPageCommand:
+					case PrevPageCallback:
 						hasPrev = true
 					}
 				}
@@ -355,7 +388,7 @@ func TestAliasBuilder_ToAlias(t *testing.T) {
 		ChatID: 123,
 		Path:   "/foo/bar",
 		Alias:  "my-file",
-		Type:   domain.TypeFile,
+		Type:   domain.PathTypeFile,
 	}
 
 	got, err := builder.toAlias()
@@ -363,7 +396,8 @@ func TestAliasBuilder_ToAlias(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, id, got.ID)
 	require.Equal(t, int64(123), got.ChatID)
-	require.Equal(t, "/foo/bar", got.Path)
+	require.Equal(t, "/foo/bar", got.Path.Value)
+	require.Equal(t, domain.PathTypeFile, got.Path.Type)
 	require.Equal(t, "my-file", got.Alias)
 }
 
@@ -383,7 +417,7 @@ func TestNewAliasBuilder(t *testing.T) {
 
 	require.NotEmpty(t, builder.ID)
 	require.Equal(t, int64(123), builder.ChatID)
-	require.Equal(t, domain.TypeFile, builder.Type)
+	require.Equal(t, domain.PathTypeFile, builder.Type)
 
 	_, err := uuid.Parse(builder.ID)
 	require.NoError(t, err)
@@ -392,7 +426,7 @@ func TestNewAliasBuilder(t *testing.T) {
 func TestPathButtons(t *testing.T) {
 	tests := []struct {
 		name     string
-		dirElems domain.Page[domain.DirElem]
+		dirElems domain.Page[domain.File]
 		payload  pathChoosingPayload
 		expected tgbotapi.InlineKeyboardMarkup
 	}{
@@ -401,10 +435,13 @@ func TestPathButtons(t *testing.T) {
 			payload: pathChoosingPayload{
 				CurPath: "",
 			},
-			dirElems: domain.Page[domain.DirElem]{
-				Values: []domain.DirElem{
+			dirElems: domain.Page[domain.File]{
+				Values: []domain.File{
 					{
-						Type: "DIR",
+						Path: domain.Path{
+							Value: "/home",
+							Type:  domain.PathTypeDir,
+						},
 						Name: "home",
 					},
 				},
@@ -413,14 +450,14 @@ func TestPathButtons(t *testing.T) {
 				InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{
 					{
 						tgbotapi.NewInlineKeyboardButtonData(
-							"DIR: home",
+							"home/",
 							"/home",
 						),
 					},
 					{
 						tgbotapi.NewInlineKeyboardButtonData(
-							"Выбрать текущую директорию как путь",
-							string(currentDirCommand),
+							currentDirButtonText,
+							currentDirCallback,
 						),
 					},
 				},
@@ -431,10 +468,13 @@ func TestPathButtons(t *testing.T) {
 			payload: pathChoosingPayload{
 				CurPath: "/home/user",
 			},
-			dirElems: domain.Page[domain.DirElem]{
-				Values: []domain.DirElem{
+			dirElems: domain.Page[domain.File]{
+				Values: []domain.File{
 					{
-						Type: "DIR",
+						Path: domain.Path{
+							Value: "/home/user/documents",
+							Type:  domain.PathTypeDir,
+						},
 						Name: "documents",
 					},
 				},
@@ -443,20 +483,59 @@ func TestPathButtons(t *testing.T) {
 				InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{
 					{
 						tgbotapi.NewInlineKeyboardButtonData(
-							"..",
-							string(prevPathCommand),
+							prevPathButtonText,
+							prevPathCallback,
 						),
 					},
 					{
 						tgbotapi.NewInlineKeyboardButtonData(
-							"DIR: documents",
+							"documents/",
 							"/documents",
 						),
 					},
 					{
 						tgbotapi.NewInlineKeyboardButtonData(
-							"Выбрать текущую директорию как путь",
-							string(currentDirCommand),
+							currentDirButtonText,
+							currentDirCallback,
+						),
+					},
+				},
+			},
+		},
+		{
+			name: "file element has no trailing slash",
+			payload: pathChoosingPayload{
+				CurPath: "/notes",
+			},
+			dirElems: domain.Page[domain.File]{
+				Values: []domain.File{
+					{
+						Path: domain.Path{
+							Value: "/notes/inbox.md",
+							Type:  domain.PathTypeFile,
+						},
+						Name: "inbox.md",
+					},
+				},
+			},
+			expected: tgbotapi.InlineKeyboardMarkup{
+				InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{
+					{
+						tgbotapi.NewInlineKeyboardButtonData(
+							prevPathButtonText,
+							prevPathCallback,
+						),
+					},
+					{
+						tgbotapi.NewInlineKeyboardButtonData(
+							"inbox.md",
+							"/inbox.md",
+						),
+					},
+					{
+						tgbotapi.NewInlineKeyboardButtonData(
+							currentDirButtonText,
+							currentDirCallback,
 						),
 					},
 				},
@@ -513,8 +592,8 @@ func TestAddAliasHandler_Handle_DefaultState(t *testing.T) {
 		DirectoryFn: func(
 			owner, repo, path string,
 			pageNum, pageSize int,
-		) (domain.Page[domain.DirElem], error) {
-			return domain.Page[domain.DirElem]{}, nil
+		) (domain.Page[domain.File], error) {
+			return domain.Page[domain.File]{}, nil
 		},
 	}
 
@@ -552,12 +631,19 @@ func TestAddAliasHandler_Handle_DefaultState(t *testing.T) {
 	require.True(t, client.DirectoryCalled)
 	require.Equal(t, "test-owner", client.DirectoryOwner)
 	require.Equal(t, "test-repo", client.DirectoryRepo)
-	require.Equal(t, "/foo", client.DirectoryPath)
+	require.Equal(t, "/", client.DirectoryPath)
 	require.Equal(t, 0, client.DirectoryPage)
 	require.Equal(t, domain.DefaultPageSize, client.DirectorySize)
 
-	require.Equal(t, StateWaitPath, session.State())
+	require.Equal(t, StateWaitPath, string(session.State()))
 	require.NotEmpty(t, session.Payload())
+
+	var payload pathChoosingPayload
+	require.NoError(
+		t,
+		json.Unmarshal(session.Payload(), &payload),
+	)
+	require.Equal(t, "/", payload.CurPath)
 
 	_, ok := resp.Message.(tgbotapi.MessageConfig)
 	require.True(t, ok)
@@ -596,8 +682,8 @@ func TestAddAliasHandler_Handle_WaitPath_UsesPayload(t *testing.T) {
 	resp, err := h.Handle(ctx,
 		session,
 		bot.Update{
-			ChatID: 123,
-			Text:   "bar",
+			ChatID:       123,
+			CallbackData: "bar",
 		})
 
 	require.NoError(t, err)
@@ -646,8 +732,8 @@ func TestAddAliasHandler_Handle_SelectCurrentDirectory(t *testing.T) {
 		context.Background(),
 		session,
 		bot.Update{
-			ChatID: 123,
-			Text:   string(currentDirCommand),
+			ChatID:       123,
+			CallbackData: currentDirCallback,
 		},
 	)
 
@@ -655,7 +741,7 @@ func TestAddAliasHandler_Handle_SelectCurrentDirectory(t *testing.T) {
 
 	require.False(t, client.DirectoryCalled)
 
-	require.Equal(t, StateWaitAlias, session.State())
+	require.Equal(t, StateWaitAlias, string(session.State()))
 
 	var payload aliasBuilder
 	require.NoError(
@@ -665,7 +751,7 @@ func TestAddAliasHandler_Handle_SelectCurrentDirectory(t *testing.T) {
 
 	require.Equal(t, int64(123), payload.ChatID)
 	require.Equal(t, "/foo/bar", payload.Path)
-	require.Equal(t, domain.TypeDir, payload.Type)
+	require.Equal(t, domain.PathTypeDir, payload.Type)
 	require.NotEmpty(t, payload.ID)
 
 	msg, ok := resp.Message.(tgbotapi.EditMessageTextConfig)
@@ -680,8 +766,8 @@ func TestAddAliasHandler_HandlePathSet_FileSelected(t *testing.T) {
 		DirectoryFn: func(
 			owner, repo, path string,
 			pageNum, pageSize int,
-		) (domain.Page[domain.DirElem], error) {
-			return domain.Page[domain.DirElem]{},
+		) (domain.Page[domain.File], error) {
+			return domain.Page[domain.File]{},
 				domain.ErrNotDirectory
 		},
 	}
@@ -711,8 +797,8 @@ func TestAddAliasHandler_HandlePathSet_FileSelected(t *testing.T) {
 		context.Background(),
 		session,
 		bot.Update{
-			ChatID: 123,
-			Text:   "bar.txt",
+			ChatID:       123,
+			CallbackData: "bar.txt",
 		},
 	)
 
@@ -720,7 +806,7 @@ func TestAddAliasHandler_HandlePathSet_FileSelected(t *testing.T) {
 
 	require.Equal(t, "/foo/bar.txt", client.DirectoryPath)
 
-	require.Equal(t, StateWaitAlias, session.State())
+	require.Equal(t, StateWaitAlias, string(session.State()))
 
 	var payload aliasBuilder
 	require.NoError(
@@ -729,7 +815,7 @@ func TestAddAliasHandler_HandlePathSet_FileSelected(t *testing.T) {
 	)
 
 	require.Equal(t, "/foo/bar.txt", payload.Path)
-	require.Equal(t, domain.TypeFile, payload.Type)
+	require.Equal(t, domain.PathTypeFile, payload.Type)
 	require.Equal(t, int64(123), payload.ChatID)
 	require.NotEmpty(t, payload.ID)
 
@@ -744,7 +830,7 @@ func TestAddAliasHandler_handleAliasSet_Success(t *testing.T) {
 		ID:     id.String(),
 		ChatID: 123,
 		Path:   "/foo/bar.txt",
-		Type:   domain.TypeFile,
+		Type:   domain.PathTypeFile,
 	})
 	require.NoError(t, err)
 
@@ -773,8 +859,11 @@ func TestAddAliasHandler_handleAliasSet_Success(t *testing.T) {
 	require.Equal(t, domain.Alias{
 		ID:     id,
 		ChatID: 123,
-		Path:   "/foo/bar.txt",
-		Alias:  "my-alias",
+		Path: domain.Path{
+			Value: "/foo/bar.txt",
+			Type:  domain.PathTypeFile,
+		},
+		Alias: "my-alias",
 	}, saver.alias)
 
 	require.NotNil(t, resp.Message)
@@ -847,7 +936,7 @@ func TestAddAliasHandler_handleAliasSet_SaveError(t *testing.T) {
 		ID:     id.String(),
 		ChatID: 123,
 		Path:   "/foo/bar.txt",
-		Type:   domain.TypeFile,
+		Type:   domain.PathTypeFile,
 	})
 	require.NoError(t, err)
 
@@ -878,6 +967,7 @@ func TestAddAliasHandler_handleAliasSet_SaveError(t *testing.T) {
 
 	require.Equal(t, id, saver.alias.ID)
 	require.Equal(t, int64(123), saver.alias.ChatID)
-	require.Equal(t, "/foo/bar.txt", saver.alias.Path)
+	require.Equal(t, "/foo/bar.txt", saver.alias.Path.Value)
+	require.Equal(t, domain.PathTypeFile, saver.alias.Path.Type)
 	require.Equal(t, "my-alias", saver.alias.Alias)
 }

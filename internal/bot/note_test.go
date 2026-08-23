@@ -101,66 +101,10 @@ func (m *noteTemplatesMock) Template(
 	return m.template, m.templateErr
 }
 
-type noteStorageMock struct {
-	mock.RemoteStorage
-
-	FileFn     func(owner, repo, path string) (domain.DirElem, error)
-	SaveNoteFn func(
-		ctx context.Context,
-		owner, repo string,
-		note domain.Note,
-	) error
-
-	FileCalled bool
-	FileOwner  string
-	FileRepo   string
-	FilePath   string
-
-	SaveNoteCalled bool
-	SaveNoteOwner  string
-	SaveNoteRepo   string
-	SavedNote      domain.Note
-}
-
-func (m *noteStorageMock) File(
-	owner string,
-	repo string,
-	path string,
-) (domain.DirElem, error) {
-	m.FileCalled = true
-	m.FileOwner = owner
-	m.FileRepo = repo
-	m.FilePath = path
-
-	if m.FileFn != nil {
-		return m.FileFn(owner, repo, path)
-	}
-
-	return domain.DirElem{}, nil
-}
-
-func (m *noteStorageMock) SaveNote(
-	ctx context.Context,
-	owner string,
-	repo string,
-	note domain.Note,
-) error {
-	m.SaveNoteCalled = true
-	m.SaveNoteOwner = owner
-	m.SaveNoteRepo = repo
-	m.SavedNote = note
-
-	if m.SaveNoteFn != nil {
-		return m.SaveNoteFn(ctx, owner, repo, note)
-	}
-
-	return nil
-}
-
 func noteAddHandlerForTest(
 	aliases *noteAliasesMock,
 	templates *noteTemplatesMock,
-	storage *noteStorageMock,
+	storage *mock.RemoteStorage,
 	vault *vaultGetterMock,
 ) *AddNoteHandler {
 	return NewAddNoteHandler(
@@ -188,9 +132,17 @@ func TestNoteAddPayload_ToNote(t *testing.T) {
 func TestNoteAddHandler_Handle_DefaultState(t *testing.T) {
 	aliases := &noteAliasesMock{
 		page: domain.Page[domain.Alias]{
+			TotalPages: 1,
+			CurPage:    0,
 			Values: []domain.Alias{
-				{Path: "/foo", Alias: "foo"},
-				{Path: "/bar", Alias: "bar"},
+				{
+					Path:  domain.Path{Value: "/foo", Type: domain.PathTypeFile},
+					Alias: "foo",
+				},
+				{
+					Path:  domain.Path{Value: "/bar", Type: domain.PathTypeFile},
+					Alias: "bar",
+				},
 			},
 		},
 	}
@@ -198,7 +150,7 @@ func TestNoteAddHandler_Handle_DefaultState(t *testing.T) {
 	h := noteAddHandlerForTest(
 		aliases,
 		&noteTemplatesMock{},
-		&noteStorageMock{},
+		&mock.RemoteStorage{},
 		&vaultGetterMock{},
 	)
 
@@ -220,7 +172,7 @@ func TestNoteAddHandler_Handle_DefaultState(t *testing.T) {
 	require.Equal(t, 0, aliases.pageNum)
 	require.Equal(t, domain.DefaultPageSize, aliases.pageSize)
 
-	require.Equal(t, bot.DefaultChatState, session.State())
+	require.Equal(t, StateNoteWaitAlias, string(session.State()))
 
 	var payload pagePayload
 	require.NoError(t, json.Unmarshal(
@@ -241,14 +193,17 @@ func TestNoteAddHandler_Handle_DefaultState_NextButton(t *testing.T) {
 		page: domain.Page[domain.Alias]{
 			TotalPages: 3,
 			CurPage:    0,
-			Values:     []domain.Alias{{Path: "/foo", Alias: "foo"}},
+			Values: []domain.Alias{{
+				Path:  domain.Path{Value: "/foo", Type: domain.PathTypeFile},
+				Alias: "foo",
+			}},
 		},
 	}
 
 	h := noteAddHandlerForTest(
 		aliases,
 		&noteTemplatesMock{},
-		&noteStorageMock{},
+		&mock.RemoteStorage{},
 		&vaultGetterMock{},
 	)
 
@@ -270,9 +225,9 @@ func TestNoteAddHandler_Handle_DefaultState_NextButton(t *testing.T) {
 	for i := range keyboard {
 		for j := range keyboard[i] {
 			switch *keyboard[i][j].CallbackData {
-			case NextPageCommand:
+			case NextPageCallback:
 				hasNext = true
-			case PrevPageCommand:
+			case PrevPageCallback:
 				hasPrev = true
 			}
 		}
@@ -282,12 +237,21 @@ func TestNoteAddHandler_Handle_DefaultState_NextButton(t *testing.T) {
 }
 
 func TestNoteAddHandler_Handle_NextPage(t *testing.T) {
-	aliases := &noteAliasesMock{}
+	aliases := &noteAliasesMock{
+		page: domain.Page[domain.Alias]{
+			TotalPages: 2,
+			CurPage:    0,
+			Values: []domain.Alias{{
+				Path:  domain.Path{Value: "/foo", Type: domain.PathTypeFile},
+				Alias: "foo",
+			}},
+		},
+	}
 
 	h := noteAddHandlerForTest(
 		aliases,
 		&noteTemplatesMock{},
-		&noteStorageMock{},
+		&mock.RemoteStorage{},
 		&vaultGetterMock{},
 	)
 
@@ -305,10 +269,10 @@ func TestNoteAddHandler_Handle_NextPage(t *testing.T) {
 		session,
 		bot.Update{
 			ChatID:       123,
-			CallbackData: NextPageCommand,
+			CallbackData: NextPageCallback,
 			Raw: tgbotapi.Update{
 				CallbackQuery: &tgbotapi.CallbackQuery{
-					Data: NextPageCommand,
+					Data: NextPageCallback,
 				},
 			},
 		},
@@ -330,12 +294,21 @@ func TestNoteAddHandler_Handle_NextPage(t *testing.T) {
 }
 
 func TestNoteAddHandler_Handle_PrevPage(t *testing.T) {
-	aliases := &noteAliasesMock{}
+	aliases := &noteAliasesMock{
+		page: domain.Page[domain.Alias]{
+			TotalPages: 2,
+			CurPage:    1,
+			Values: []domain.Alias{{
+				Path:  domain.Path{Value: "/foo", Type: domain.PathTypeFile},
+				Alias: "foo",
+			}},
+		},
+	}
 
 	h := noteAddHandlerForTest(
 		aliases,
 		&noteTemplatesMock{},
-		&noteStorageMock{},
+		&mock.RemoteStorage{},
 		&vaultGetterMock{},
 	)
 
@@ -353,10 +326,10 @@ func TestNoteAddHandler_Handle_PrevPage(t *testing.T) {
 		session,
 		bot.Update{
 			ChatID:       123,
-			CallbackData: PrevPageCommand,
+			CallbackData: PrevPageCallback,
 			Raw: tgbotapi.Update{
 				CallbackQuery: &tgbotapi.CallbackQuery{
-					Data: PrevPageCommand,
+					Data: PrevPageCallback,
 				},
 			},
 		},
@@ -382,16 +355,28 @@ func TestNoteAddHandler_Handle_SelectAlias(t *testing.T) {
 		alias: domain.Alias{
 			ID:     aliasID,
 			ChatID: 123,
-			Path:   "/notes/inbox",
-			Alias:  "inbox",
+			Path: domain.Path{
+				Value: "/notes/inbox",
+				Type:  domain.PathTypeFile,
+			},
+			Alias: "inbox",
 		},
 	}
-	templates := &noteTemplatesMock{}
+	templates := &noteTemplatesMock{
+		page: domain.Page[domain.Template]{
+			TotalPages: 1,
+			CurPage:    0,
+			Values: []domain.Template{{
+				ID:   uuid.New(),
+				Name: "daily",
+			}},
+		},
+	}
 
 	h := noteAddHandlerForTest(
 		aliases,
 		templates,
-		&noteStorageMock{},
+		&mock.RemoteStorage{},
 		&vaultGetterMock{},
 	)
 
@@ -427,7 +412,7 @@ func TestNoteAddHandler_Handle_SelectAlias(t *testing.T) {
 	require.True(t, templates.pageCalled)
 	require.Equal(t, 0, templates.pageNum)
 
-	require.Equal(t, StateNoteWaitTemplate, session.State())
+	require.Equal(t, StateNoteWaitTemplate, string(session.State()))
 
 	var payload noteAddPayload
 	require.NoError(t, json.Unmarshal(
@@ -435,6 +420,7 @@ func TestNoteAddHandler_Handle_SelectAlias(t *testing.T) {
 		&payload,
 	))
 	require.Equal(t, "/notes/inbox", payload.Path)
+	require.Equal(t, domain.PathTypeFile, payload.PathType)
 
 	msg, ok := resp.Message.(tgbotapi.EditMessageTextConfig)
 	require.True(t, ok)
@@ -444,21 +430,24 @@ func TestNoteAddHandler_Handle_SelectAlias(t *testing.T) {
 	require.NotNil(t, msg.ReplyMarkup)
 }
 
-func TestNoteAddHandler_Handle_UnknownState_SelectsAlias(t *testing.T) {
-	aliasID := uuid.New()
-
+func TestNoteAddHandler_Handle_UnknownState_ListsAliases(t *testing.T) {
 	aliases := &noteAliasesMock{
-		alias: domain.Alias{
-			ID:     aliasID,
-			ChatID: 123,
-			Path:   "/notes/inbox",
+		page: domain.Page[domain.Alias]{
+			TotalPages: 1,
+			CurPage:    0,
+			Values: []domain.Alias{
+				{
+					Path:  domain.Path{Value: "/foo", Type: domain.PathTypeFile},
+					Alias: "foo",
+				},
+			},
 		},
 	}
 
 	h := noteAddHandlerForTest(
 		aliases,
 		&noteTemplatesMock{},
-		&noteStorageMock{},
+		&mock.RemoteStorage{},
 		&vaultGetterMock{},
 	)
 
@@ -475,23 +464,33 @@ func TestNoteAddHandler_Handle_UnknownState_SelectsAlias(t *testing.T) {
 		context.Background(),
 		session,
 		bot.Update{
-			ChatID:       123,
-			CallbackData: aliasID.String(),
-			Raw: tgbotapi.Update{
-				CallbackQuery: &tgbotapi.CallbackQuery{
-					Data: aliasID.String(),
-				},
-			},
+			ChatID: 123,
+			Text:   "whatever",
 		},
 	)
 
 	require.NoError(t, err)
 
-	require.True(t, aliases.aliasCalled)
-	require.Equal(t, aliasID.String(), aliases.aliasID)
+	require.False(t, aliases.aliasCalled)
+	require.True(t, aliases.pageCalled)
+	require.Equal(t, int64(123), aliases.chatID)
+	require.Equal(t, 0, aliases.pageNum)
+	require.Equal(t, domain.DefaultPageSize, aliases.pageSize)
 
-	require.Equal(t, StateNoteWaitTemplate, session.State())
-	_ = resp
+	require.Equal(t, StateNoteWaitAlias, string(session.State()))
+
+	var payload pagePayload
+	require.NoError(t, json.Unmarshal(
+		session.Payload(),
+		&payload,
+	))
+	require.Equal(t, 0, payload.PageNum)
+
+	msg, ok := resp.Message.(tgbotapi.MessageConfig)
+	require.True(t, ok)
+
+	require.Equal(t, int64(123), msg.ChatID)
+	require.Equal(t, "Выберите путь", msg.Text)
 }
 
 func TestNoteAddHandler_Handle_InvalidPayload(t *testing.T) {
@@ -500,7 +499,7 @@ func TestNoteAddHandler_Handle_InvalidPayload(t *testing.T) {
 	h := noteAddHandlerForTest(
 		aliases,
 		&noteTemplatesMock{},
-		&noteStorageMock{},
+		&mock.RemoteStorage{},
 		&vaultGetterMock{},
 	)
 
@@ -515,7 +514,7 @@ func TestNoteAddHandler_Handle_InvalidPayload(t *testing.T) {
 			ChatID: 123,
 			Raw: tgbotapi.Update{
 				CallbackQuery: &tgbotapi.CallbackQuery{
-					Data: NextPageCommand,
+					Data: NextPageCallback,
 				},
 			},
 		},
@@ -536,7 +535,7 @@ func TestNoteAddHandler_Handle_SelectAlias_AliasError(t *testing.T) {
 	h := noteAddHandlerForTest(
 		aliases,
 		&noteTemplatesMock{},
-		&noteStorageMock{},
+		&mock.RemoteStorage{},
 		&vaultGetterMock{},
 	)
 
@@ -576,10 +575,15 @@ func TestNoteAddHandler_Handle_SelectAlias_TemplatesError(t *testing.T) {
 
 	h := noteAddHandlerForTest(
 		&noteAliasesMock{
-			alias: domain.Alias{Path: "/notes/inbox"},
+			alias: domain.Alias{
+				Path: domain.Path{
+					Value: "/notes/inbox",
+					Type:  domain.PathTypeFile,
+				},
+			},
 		},
 		templates,
-		&noteStorageMock{},
+		&mock.RemoteStorage{},
 		&vaultGetterMock{},
 	)
 
@@ -620,7 +624,7 @@ func TestNoteAddHandler_Handle_AliasPageError(t *testing.T) {
 	h := noteAddHandlerForTest(
 		aliases,
 		&noteTemplatesMock{},
-		&noteStorageMock{},
+		&mock.RemoteStorage{},
 		&vaultGetterMock{},
 	)
 
@@ -654,7 +658,7 @@ func TestNoteAddHandler_Handle_SelectTemplate(t *testing.T) {
 	h := noteAddHandlerForTest(
 		&noteAliasesMock{},
 		templates,
-		&noteStorageMock{},
+		&mock.RemoteStorage{},
 		&vaultGetterMock{},
 	)
 
@@ -691,7 +695,7 @@ func TestNoteAddHandler_Handle_SelectTemplate(t *testing.T) {
 	require.Equal(t, templateID.String(), templates.templateID)
 	require.Equal(t, int64(123), templates.templateChatID)
 
-	require.Equal(t, StateNoteWaitText, session.State())
+	require.Equal(t, StateNoteWaitText, string(session.State()))
 
 	var got noteAddPayload
 	require.NoError(t, json.Unmarshal(
@@ -711,12 +715,21 @@ func TestNoteAddHandler_Handle_SelectTemplate(t *testing.T) {
 }
 
 func TestNoteAddHandler_Handle_Template_NextPage(t *testing.T) {
-	templates := &noteTemplatesMock{}
+	templates := &noteTemplatesMock{
+		page: domain.Page[domain.Template]{
+			TotalPages: 3,
+			CurPage:    1,
+			Values: []domain.Template{{
+				ID:   uuid.New(),
+				Name: "daily",
+			}},
+		},
+	}
 
 	h := noteAddHandlerForTest(
 		&noteAliasesMock{},
 		templates,
-		&noteStorageMock{},
+		&mock.RemoteStorage{},
 		&vaultGetterMock{},
 	)
 
@@ -739,7 +752,7 @@ func TestNoteAddHandler_Handle_Template_NextPage(t *testing.T) {
 			ChatID: 123,
 			Raw: tgbotapi.Update{
 				CallbackQuery: &tgbotapi.CallbackQuery{
-					Data: NextPageCommand,
+					Data: NextPageCallback,
 				},
 			},
 		},
@@ -767,7 +780,7 @@ func TestNoteAddHandler_Handle_Template_InvalidPayload(t *testing.T) {
 	h := noteAddHandlerForTest(
 		&noteAliasesMock{},
 		templates,
-		&noteStorageMock{},
+		&mock.RemoteStorage{},
 		&vaultGetterMock{},
 	)
 
@@ -782,7 +795,7 @@ func TestNoteAddHandler_Handle_Template_InvalidPayload(t *testing.T) {
 			ChatID: 123,
 			Raw: tgbotapi.Update{
 				CallbackQuery: &tgbotapi.CallbackQuery{
-					Data: NextPageCommand,
+					Data: NextPageCallback,
 				},
 			},
 		},
@@ -803,7 +816,7 @@ func TestNoteAddHandler_Handle_Template_TemplateError(t *testing.T) {
 	h := noteAddHandlerForTest(
 		&noteAliasesMock{},
 		templates,
-		&noteStorageMock{},
+		&mock.RemoteStorage{},
 		&vaultGetterMock{},
 	)
 
@@ -833,14 +846,8 @@ func TestNoteAddHandler_Handle_Template_TemplateError(t *testing.T) {
 	require.Equal(t, bot.Response{}, resp)
 }
 
-func TestNoteAddHandler_Handle_Text_ExistingFile(t *testing.T) {
-	storage := &noteStorageMock{
-		FileFn: func(
-			owner, repo, path string,
-		) (domain.DirElem, error) {
-			return domain.DirElem{Type: domain.TypeFile}, nil
-		},
-	}
+func TestNoteAddHandler_Handle_Text_FilePath_UpdatesNote(t *testing.T) {
+	storage := &mock.RemoteStorage{}
 	vault := &vaultGetterMock{
 		vault: domain.UserVault{
 			Owner: "test-owner",
@@ -856,7 +863,8 @@ func TestNoteAddHandler_Handle_Text_ExistingFile(t *testing.T) {
 	)
 
 	raw, err := json.Marshal(noteAddPayload{
-		Path:     "/notes/inbox",
+		Path:     "/notes/inbox.md",
+		PathType: domain.PathTypeFile,
 		Template: "daily",
 	})
 	require.NoError(t, err)
@@ -876,19 +884,15 @@ func TestNoteAddHandler_Handle_Text_ExistingFile(t *testing.T) {
 
 	require.NoError(t, err)
 
-	require.True(t, storage.FileCalled)
-	require.Equal(t, "test-owner", storage.FileOwner)
-	require.Equal(t, "test-repo", storage.FileRepo)
-	require.Equal(t, "/notes/inbox", storage.FilePath)
-
-	require.True(t, storage.SaveNoteCalled)
-	require.Equal(t, "test-owner", storage.SaveNoteOwner)
-	require.Equal(t, "test-repo", storage.SaveNoteRepo)
+	require.True(t, storage.UpdateNoteCalled)
+	require.False(t, storage.CreateNoteCalled)
+	require.Equal(t, "test-owner", storage.UpdateNoteOwner)
+	require.Equal(t, "test-repo", storage.UpdateNoteRepo)
 	require.Equal(t, domain.Note{
-		Path:     "/notes/inbox",
+		Path:     "/notes/inbox.md",
 		Template: "daily",
 		Text:     "content",
-	}, storage.SavedNote)
+	}, storage.UpdatedNote)
 
 	require.Equal(t, bot.DefaultChatState, session.State())
 
@@ -896,17 +900,11 @@ func TestNoteAddHandler_Handle_Text_ExistingFile(t *testing.T) {
 	require.True(t, ok)
 
 	require.Equal(t, int64(123), msg.ChatID)
-	require.Equal(t, "Заметка успешно сохранена", msg.Text)
+	require.Equal(t, "Заметка успешно обновлена", msg.Text)
 }
 
-func TestNoteAddHandler_Handle_Text_FileNotFound(t *testing.T) {
-	storage := &noteStorageMock{
-		FileFn: func(
-			owner, repo, path string,
-		) (domain.DirElem, error) {
-			return domain.DirElem{}, errors.New("file not found")
-		},
-	}
+func TestNoteAddHandler_Handle_Text_DirPath_AsksFilename(t *testing.T) {
+	storage := &mock.RemoteStorage{}
 
 	h := noteAddHandlerForTest(
 		&noteAliasesMock{},
@@ -916,7 +914,8 @@ func TestNoteAddHandler_Handle_Text_FileNotFound(t *testing.T) {
 	)
 
 	raw, err := json.Marshal(noteAddPayload{
-		Path: "/notes/inbox",
+		Path:     "/notes/inbox",
+		PathType: domain.PathTypeDir,
 	})
 	require.NoError(t, err)
 
@@ -935,9 +934,10 @@ func TestNoteAddHandler_Handle_Text_FileNotFound(t *testing.T) {
 
 	require.NoError(t, err)
 
-	require.False(t, storage.SaveNoteCalled)
+	require.False(t, storage.UpdateNoteCalled)
+	require.False(t, storage.CreateNoteCalled)
 
-	require.Equal(t, StateNoteWaitFilename, session.State())
+	require.Equal(t, StateNoteWaitFilename, string(session.State()))
 
 	var got noteAddPayload
 	require.NoError(t, json.Unmarshal(
@@ -953,48 +953,6 @@ func TestNoteAddHandler_Handle_Text_FileNotFound(t *testing.T) {
 	require.Equal(t, "Введите название файла", msg.Text)
 }
 
-func TestNoteAddHandler_Handle_Text_NotFileType(t *testing.T) {
-	storage := &noteStorageMock{
-		FileFn: func(
-			owner, repo, path string,
-		) (domain.DirElem, error) {
-			return domain.DirElem{Type: domain.TypeDir}, nil
-		},
-	}
-
-	h := noteAddHandlerForTest(
-		&noteAliasesMock{},
-		&noteTemplatesMock{},
-		storage,
-		&vaultGetterMock{},
-	)
-
-	raw, err := json.Marshal(noteAddPayload{
-		Path: "/notes/inbox",
-	})
-	require.NoError(t, err)
-
-	session := bot.NewChatSession(123)
-	session.SetState(StateNoteWaitText)
-	session.SetPayload(raw)
-
-	resp, err := h.Handle(
-		context.Background(),
-		session,
-		bot.Update{
-			ChatID: 123,
-			Text:   "content",
-		},
-	)
-
-	require.NoError(t, err)
-
-	require.False(t, storage.SaveNoteCalled)
-
-	require.Equal(t, StateNoteWaitFilename, session.State())
-	_ = resp
-}
-
 func TestNoteAddHandler_Handle_Text_ClientError(t *testing.T) {
 	expectedErr := errors.New("client error")
 
@@ -1006,7 +964,8 @@ func TestNoteAddHandler_Handle_Text_ClientError(t *testing.T) {
 	)
 
 	raw, err := json.Marshal(noteAddPayload{
-		Path: "/notes/inbox",
+		Path:     "/notes/inbox",
+		PathType: domain.PathTypeFile,
 	})
 	require.NoError(t, err)
 
@@ -1025,96 +984,21 @@ func TestNoteAddHandler_Handle_Text_ClientError(t *testing.T) {
 
 	require.ErrorIs(t, err, expectedErr)
 	require.Equal(t, bot.Response{}, resp)
-}
-
-func TestNoteAddHandler_Handle_Text_VaultError(t *testing.T) {
-	expectedErr := errors.New("vault error")
-
-	h := noteAddHandlerForTest(
-		&noteAliasesMock{},
-		&noteTemplatesMock{},
-		&noteStorageMock{},
-		&vaultGetterMock{err: expectedErr},
-	)
-
-	raw, err := json.Marshal(noteAddPayload{
-		Path: "/notes/inbox",
-	})
-	require.NoError(t, err)
-
-	session := bot.NewChatSession(123)
-	session.SetState(StateNoteWaitText)
-	session.SetPayload(raw)
-
-	resp, err := h.Handle(
-		context.Background(),
-		session,
-		bot.Update{
-			ChatID: 123,
-			Text:   "content",
-		},
-	)
-
-	require.ErrorIs(t, err, expectedErr)
-	require.Equal(t, bot.Response{}, resp)
-}
-
-func TestNoteAddHandler_Handle_Text_SaveNoteError(t *testing.T) {
-	expectedErr := errors.New("save note failed")
-
-	storage := &noteStorageMock{
-		FileFn: func(
-			owner, repo, path string,
-		) (domain.DirElem, error) {
-			return domain.DirElem{Type: domain.TypeFile}, nil
-		},
-		SaveNoteFn: func(
-			ctx context.Context,
-			owner, repo string,
-			note domain.Note,
-		) error {
-			return expectedErr
-		},
-	}
-
-	h := noteAddHandlerForTest(
-		&noteAliasesMock{},
-		&noteTemplatesMock{},
-		storage,
-		&vaultGetterMock{},
-	)
-
-	raw, err := json.Marshal(noteAddPayload{
-		Path: "/notes/inbox",
-	})
-	require.NoError(t, err)
-
-	session := bot.NewChatSession(123)
-	session.SetState(StateNoteWaitText)
-	session.SetPayload(raw)
-
-	resp, err := h.Handle(
-		context.Background(),
-		session,
-		bot.Update{
-			ChatID: 123,
-			Text:   "content",
-		},
-	)
-
-	require.ErrorIs(t, err, expectedErr)
-	require.Equal(t, bot.Response{}, resp)
-	require.True(t, storage.SaveNoteCalled)
 }
 
 func TestNoteAddHandler_Handle_Filename(t *testing.T) {
-	storage := &noteStorageMock{}
+	storage := &mock.RemoteStorage{}
 
 	h := noteAddHandlerForTest(
 		&noteAliasesMock{},
 		&noteTemplatesMock{},
 		storage,
-		&vaultGetterMock{},
+		&vaultGetterMock{
+			vault: domain.UserVault{
+				Owner: "test-owner",
+				Repo:  "test-repo",
+			},
+		},
 	)
 
 	raw, err := json.Marshal(noteAddPayload{
@@ -1138,7 +1022,14 @@ func TestNoteAddHandler_Handle_Filename(t *testing.T) {
 
 	require.NoError(t, err)
 
-	require.False(t, storage.SaveNoteCalled)
+	require.True(t, storage.CreateNoteCalled)
+	require.False(t, storage.UpdateNoteCalled)
+	require.Equal(t, "test-owner", storage.CreateNoteOwner)
+	require.Equal(t, "test-repo", storage.CreateNoteRepo)
+	require.Equal(t, domain.Note{
+		Path: "/notes/new.md",
+		Text: "content",
+	}, storage.CreatedNote)
 
 	require.Equal(t, bot.DefaultChatState, session.State())
 
@@ -1150,13 +1041,18 @@ func TestNoteAddHandler_Handle_Filename(t *testing.T) {
 }
 
 func TestNoteAddHandler_Handle_Filename_NoTrailingSlash(t *testing.T) {
-	storage := &noteStorageMock{}
+	storage := &mock.RemoteStorage{}
 
 	h := noteAddHandlerForTest(
 		&noteAliasesMock{},
 		&noteTemplatesMock{},
 		storage,
-		&vaultGetterMock{},
+		&vaultGetterMock{
+			vault: domain.UserVault{
+				Owner: "test-owner",
+				Repo:  "test-repo",
+			},
+		},
 	)
 
 	raw, err := json.Marshal(noteAddPayload{
@@ -1179,18 +1075,24 @@ func TestNoteAddHandler_Handle_Filename_NoTrailingSlash(t *testing.T) {
 	)
 
 	require.NoError(t, err)
-	require.False(t, storage.SaveNoteCalled)
+	require.True(t, storage.CreateNoteCalled)
+	require.Equal(t, "/notes/new.md", storage.CreatedNote.Path)
 	require.Equal(t, bot.DefaultChatState, session.State())
 }
 
 func TestNoteAddHandler_Handle_Filename_Root(t *testing.T) {
-	storage := &noteStorageMock{}
+	storage := &mock.RemoteStorage{}
 
 	h := noteAddHandlerForTest(
 		&noteAliasesMock{},
 		&noteTemplatesMock{},
 		storage,
-		&vaultGetterMock{},
+		&vaultGetterMock{
+			vault: domain.UserVault{
+				Owner: "test-owner",
+				Repo:  "test-repo",
+			},
+		},
 	)
 
 	raw, err := json.Marshal(noteAddPayload{
@@ -1212,12 +1114,13 @@ func TestNoteAddHandler_Handle_Filename_Root(t *testing.T) {
 	)
 
 	require.NoError(t, err)
-	require.False(t, storage.SaveNoteCalled)
+	require.True(t, storage.CreateNoteCalled)
+	require.Equal(t, "new.md", storage.CreatedNote.Path)
 	require.Equal(t, bot.DefaultChatState, session.State())
 }
 
 func TestNoteAddHandler_Handle_Filename_InvalidPayload(t *testing.T) {
-	storage := &noteStorageMock{}
+	storage := &mock.RemoteStorage{}
 
 	h := noteAddHandlerForTest(
 		&noteAliasesMock{},
@@ -1241,5 +1144,5 @@ func TestNoteAddHandler_Handle_Filename_InvalidPayload(t *testing.T) {
 
 	require.Error(t, err)
 	require.Equal(t, bot.Response{}, resp)
-	require.False(t, storage.SaveNoteCalled)
+	require.False(t, storage.CreateNoteCalled)
 }

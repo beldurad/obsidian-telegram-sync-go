@@ -1,8 +1,11 @@
 package bot
 
 const (
-	NextPageCommand = "next"
-	PrevPageCommand = "prev"
+	NextPageCallback   = "next"
+	NextPageButtonText = ">"
+
+	PrevPageCallback   = "prev"
+	PrevPageButtonText = "<"
 )
 
 type pagePayload struct {

@@ -26,7 +26,9 @@ type DatabaseConfig struct {
 }
 
 type TelegramConfig struct {
-	Token string `yaml:"token"`
+	WebhookURL      string `yaml:"webhook_url"`
+	WebhookEndpoint string `yaml:"webhook_endpoint"`
+	Token           string `yaml:"token"`
 }
 
 type GithubConfig struct {

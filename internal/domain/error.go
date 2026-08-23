@@ -10,4 +10,6 @@ var (
 	ErrDb            = fmt.Errorf("DB error")
 	ErrBadArgument   = fmt.Errorf("Bad argument error")
 	ErrAlreadyExists = fmt.Errorf("Resource already exists")
+	ErrUnauthorized  = fmt.Errorf("User unauthorized")
+	ErrNoRights      = fmt.Errorf("Bot has no right to do this")
 )

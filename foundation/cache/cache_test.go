@@ -9,7 +9,7 @@ import (
 )
 
 func TestNewLRU(t *testing.T) {
-	cache := NewLRU[string, int](3)
+	cache := NewLRU[string, int](WithCapacity[string, int](3))
 
 	require.NotNil(t, cache, "NewLRU returned nil")
 	require.Equal(t, 3, cache.capacity)
@@ -19,7 +19,7 @@ func TestNewLRU(t *testing.T) {
 }
 
 func TestLRUPutAndGet(t *testing.T) {
-	cache := NewLRU[string, int](3)
+	cache := NewLRU[string, int](WithCapacity[string, int](3))
 
 	cache.Put("one", 1)
 	cache.Put("two", 2)
@@ -34,7 +34,7 @@ func TestLRUPutAndGet(t *testing.T) {
 }
 
 func TestLRUGetMissingKey(t *testing.T) {
-	cache := NewLRU[string, int](3)
+	cache := NewLRU[string, int](WithCapacity[string, int](3))
 
 	cache.Put("one", 1)
 
@@ -44,7 +44,7 @@ func TestLRUGetMissingKey(t *testing.T) {
 }
 
 func TestLRUPutUpdatesExistingValue(t *testing.T) {
-	cache := NewLRU[string, int](3)
+	cache := NewLRU[string, int](WithCapacity[string, int](3))
 
 	cache.Put("one", 1)
 	cache.Put("one", 100)
@@ -56,7 +56,7 @@ func TestLRUPutUpdatesExistingValue(t *testing.T) {
 }
 
 func TestLRUEviction(t *testing.T) {
-	cache := NewLRU[string, int](2)
+	cache := NewLRU[string, int](WithCapacity[string, int](2))
 
 	cache.Put("one", 1)
 	cache.Put("two", 2)
@@ -75,7 +75,7 @@ func TestLRUEviction(t *testing.T) {
 }
 
 func TestLRUGetChangesOrder(t *testing.T) {
-	cache := NewLRU[string, int](3)
+	cache := NewLRU[string, int](WithCapacity[string, int](3))
 
 	cache.Put("one", 1)
 	cache.Put("two", 2)
@@ -105,7 +105,7 @@ func TestLRUGetChangesOrder(t *testing.T) {
 }
 
 func TestLRUOrderAfterMultipleGets(t *testing.T) {
-	cache := NewLRU[string, int](4)
+	cache := NewLRU[string, int](WithCapacity[string, int](4))
 
 	cache.Put("one", 1)
 	cache.Put("two", 2)
@@ -136,7 +136,7 @@ func TestLRUOrderAfterMultipleGets(t *testing.T) {
 }
 
 func TestLRUDeleteHead(t *testing.T) {
-	cache := NewLRU[string, int](3)
+	cache := NewLRU[string, int](WithCapacity[string, int](3))
 
 	cache.Put("one", 1)
 	cache.Put("two", 2)
@@ -153,7 +153,7 @@ func TestLRUDeleteHead(t *testing.T) {
 }
 
 func TestLRUDeleteTail(t *testing.T) {
-	cache := NewLRU[string, int](3)
+	cache := NewLRU[string, int](WithCapacity[string, int](3))
 
 	cache.Put("one", 1)
 	cache.Put("two", 2)
@@ -170,7 +170,7 @@ func TestLRUDeleteTail(t *testing.T) {
 }
 
 func TestLRUDeleteMiddle(t *testing.T) {
-	cache := NewLRU[string, int](3)
+	cache := NewLRU[string, int](WithCapacity[string, int](3))
 
 	cache.Put("one", 1)
 	cache.Put("two", 2)
@@ -190,7 +190,7 @@ func TestLRUDeleteMiddle(t *testing.T) {
 }
 
 func TestLRUDeleteMissingKey(t *testing.T) {
-	cache := NewLRU[string, int](2)
+	cache := NewLRU[string, int](WithCapacity[string, int](2))
 
 	cache.Put("one", 1)
 	cache.Put("two", 2)
@@ -201,7 +201,7 @@ func TestLRUDeleteMissingKey(t *testing.T) {
 }
 
 func TestLRUCapacityOne(t *testing.T) {
-	cache := NewLRU[string, int](1)
+	cache := NewLRU[string, int](WithCapacity[string, int](1))
 
 	cache.Put("one", 1)
 
@@ -220,7 +220,7 @@ func TestLRUCapacityOne(t *testing.T) {
 }
 
 func TestLRUSingleElementDelete(t *testing.T) {
-	cache := NewLRU[string, int](1)
+	cache := NewLRU[string, int](WithCapacity[string, int](1))
 
 	cache.Put("one", 1)
 	cache.Delete("one")
@@ -236,7 +236,7 @@ func TestLRUGenericTypes(t *testing.T) {
 		Name string
 	}
 
-	cache := NewLRU[int, User](2)
+	cache := NewLRU[int, User](WithCapacity[int, User](2))
 
 	cache.Put(1, User{ID: 1, Name: "Alice"})
 	cache.Put(2, User{ID: 2, Name: "Bob"})
@@ -249,7 +249,7 @@ func TestLRUGenericTypes(t *testing.T) {
 }
 
 func TestLRUStringValues(t *testing.T) {
-	cache := NewLRU[string, string](2)
+	cache := NewLRU[string, string](WithCapacity[string, string](2))
 
 	cache.Put("language", "Go")
 	cache.Put("version", "1.26")
@@ -260,7 +260,7 @@ func TestLRUStringValues(t *testing.T) {
 }
 
 func TestLRUInternalListConsistency(t *testing.T) {
-	cache := NewLRU[string, int](4)
+	cache := NewLRU[string, int](WithCapacity[string, int](4))
 
 	cache.Put("one", 1)
 	cache.Put("two", 2)
@@ -288,7 +288,7 @@ func TestLRUInternalListConsistency(t *testing.T) {
 }
 
 func TestLRUConcurrentAccess(t *testing.T) {
-	cache := NewLRU[int, int](100)
+	cache := NewLRU[int, int](WithCapacity[int, int](100))
 
 	const goroutines = 10
 	const operations = 100
@@ -317,7 +317,7 @@ func TestLRUConcurrentAccess(t *testing.T) {
 }
 
 func TestLRURepeatedPutDoesNotGrowCache(t *testing.T) {
-	cache := NewLRU[string, int](3)
+	cache := NewLRU(WithCapacity[string, int](3))
 
 	for i := 0; i < 100; i++ {
 		cache.Put("same", i)

@@ -13,7 +13,7 @@ var _ bot.ChatSessionService = &ChatSessionService{}
 
 func NewChatSessionService() *ChatSessionService {
 	return &ChatSessionService{
-		lru: cache.NewLRU[int64, *bot.ChatSession](defCap),
+		lru: cache.NewLRU[int64, *bot.ChatSession](),
 	}
 }
 

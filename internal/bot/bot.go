@@ -8,8 +8,8 @@ import (
 	"github.com/beldurad/obsidian-telegram-sync-go/internal/config"
 )
 
-func Init(cfg config.TelegramConfig, sessionService bot.ChatSessionService, log *slog.Logger) *bot.Bot {
-	client, err := telegram.New(cfg.Token)
+func Init(cfg config.Config, sessionService bot.ChatSessionService, log *slog.Logger) *bot.Bot {
+	client, err := telegram.New(cfg)
 	if err != nil {
 		panic(err)
 	}

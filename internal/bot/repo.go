@@ -17,12 +17,12 @@ var RepoSetState = bot.ChatState("SETTING_REPO")
 
 // ===== COMMANDS =====
 
-const CommandSetRepo = "/set-repo"
+const CommandSetRepo = "/set_repo"
 
 var RepoSetCommands = []string{
 	CommandSetRepo,
-	NextPageCommand,
-	PrevPageCommand,
+	NextPageCallback,
+	PrevPageCallback,
 }
 
 // ===== SET REPO =====
@@ -51,7 +51,11 @@ func NewRepoSetHandler(clientGetter ClientGetter, vaultService UserVaultService)
 }
 
 func (h *RepoSetHandler) Match(ctx context.Context, s *bot.ChatSession, u bot.Update) bool {
-	return u.Text == CommandSetRepo || s.State() == RepoSetState
+	if u.Text == CommandSetRepo {
+		s.ToDefault()
+		return true
+	}
+	return s.State() == RepoSetState && u.CallbackData != ""
 }
 
 func (h *RepoSetHandler) Handle(ctx context.Context, s *bot.ChatSession, u bot.Update) (resp bot.Response, err error) {
@@ -91,9 +95,9 @@ func (h *RepoSetHandler) Handle(ctx context.Context, s *bot.ChatSession, u bot.U
 			return bot.Response{}, fmt.Errorf("%v: unmarshaling payload: %w", op, err)
 		}
 		switch u.Raw.CallbackData() {
-		case NextPageCommand:
+		case NextPageCallback:
 			payload.PageNum++
-		case PrevPageCommand:
+		case PrevPageCallback:
 			payload.PageNum = max(0, payload.PageNum-1)
 		}
 	}
@@ -109,15 +113,21 @@ func (h *RepoSetHandler) Handle(ctx context.Context, s *bot.ChatSession, u bot.U
 			tgbotapi.NewInlineKeyboardButtonData(repo.Name, repo.Name),
 		}
 	}
-	if repoPage.HasNext() {
-		buttons = append(buttons, []tgbotapi.InlineKeyboardButton{
-			tgbotapi.NewInlineKeyboardButtonData("Next", NextPageCommand),
-		})
-	}
+	paginationRow := make([]tgbotapi.InlineKeyboardButton, 0)
 	if repoPage.HasPrev() {
-		buttons = append(buttons, []tgbotapi.InlineKeyboardButton{
-			tgbotapi.NewInlineKeyboardButtonData("Prev", PrevPageCommand),
-		})
+		paginationRow = append(
+			paginationRow,
+			tgbotapi.NewInlineKeyboardButtonData(PrevPageButtonText, PrevPageCallback),
+		)
+	}
+	if repoPage.HasNext() {
+		paginationRow = append(
+			paginationRow,
+			tgbotapi.NewInlineKeyboardButtonData(NextPageButtonText, NextPageCallback),
+		)
+	}
+	if len(paginationRow) != 0 {
+		buttons = append(buttons, paginationRow)
 	}
 	markup := tgbotapi.InlineKeyboardMarkup{
 		InlineKeyboard: buttons,
@@ -173,6 +183,8 @@ func (h *RepoSetHandler) handleChosenRepo(ctx context.Context, session *bot.Chat
 	if err := h.vaultService.Save(ctx, vault); err != nil {
 		return bot.Response{}, fmt.Errorf("%v: saving vault: %w", op, err)
 	}
+
+	session.ToDefault()
 	msgCfg := tgbotapi.NewEditMessageText(
 		chatID,
 		lastMessageID,

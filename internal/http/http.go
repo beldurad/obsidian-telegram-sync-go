@@ -9,12 +9,10 @@ import (
 )
 
 func StartServer(cfg config.Config, authService AuthService, log *slog.Logger) *http.Server {
-	mux := http.NewServeMux()
 	authHandler := NewAuthHandler(authService, log)
-	mux.Handle(CallbackEndpoint, authHandler)
+	http.Handle(CallbackEndpoint, authHandler)
 	server := http.Server{
-		Addr:    cfg.Addr,
-		Handler: mux,
+		Addr: cfg.Addr,
 	}
 	go func() {
 		err := server.ListenAndServeTLS(

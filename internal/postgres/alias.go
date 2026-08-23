@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"math"
 
 	"github.com/beldurad/obsidian-telegram-sync-go/internal/domain"
 	"github.com/google/uuid"
@@ -35,9 +34,9 @@ func NewAliasStorage(db *sql.DB, pageCountCache AliasPageCountCache) *AliasStora
 func (s *AliasStorage) Save(ctx context.Context, a domain.Alias) (err error) {
 	const op = "AliasStorage.Save"
 	const query = `
-	INSERT INTO alias (id, chat_id, path, alias)
+	INSERT INTO alias (id, chat_id, path, path_type, alias)
 	VALUES
-	($1, $2, $3, $4)
+	($1, $2, $3, $4, $5)
 	`
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -58,7 +57,8 @@ func (s *AliasStorage) Save(ctx context.Context, a domain.Alias) (err error) {
 		query,
 		a.ID,
 		a.ChatID,
-		a.Path,
+		a.Path.Value,
+		a.Path.Type,
 		a.Alias,
 	)
 	if err != nil {
@@ -76,16 +76,21 @@ func (s *AliasStorage) Save(ctx context.Context, a domain.Alias) (err error) {
 
 func (s *AliasStorage) AliasPage(ctx context.Context, chatID int64, pageNum, pageSize int) (domain.Page[domain.Alias], error) {
 	const op = "AliasStorage.AliasPage"
+
+	var zero domain.Page[domain.Alias]
+
 	if pageNum < 0 || pageSize < 0 {
-		return domain.Page[domain.Alias]{}, domain.ErrBadArgument
+		return zero, domain.ErrBadArgument
 	}
 	if pageSize == 0 {
-		return domain.Page[domain.Alias]{}, nil
+		return zero, nil
 	}
+
 	page := domain.Page[domain.Alias]{}
 	page.CurPage = pageNum
-	if pageNum, ok := s.pageCountCache.Get(ctx, chatID, pageSize); ok {
-		page.TotalPages = pageNum
+
+	if totalPages, ok := s.pageCountCache.Get(ctx, chatID, pageSize); ok {
+		page.TotalPages = totalPages
 	} else {
 		const countQuery = `
 		SELECT COUNT(id)
@@ -98,13 +103,12 @@ func (s *AliasStorage) AliasPage(ctx context.Context, chatID int64, pageNum, pag
 			countQuery, chatID,
 		).Scan(&count)
 		if err != nil {
-			return domain.Page[domain.Alias]{}, fmt.Errorf("%v: counting aliases: %w: %w", op, domain.ErrDb, err)
+			return zero, fmt.Errorf("%v: counting aliases: %w: %w", op, domain.ErrDb, err)
 		}
-		page.TotalPages = int(
-			math.Ceil(
-				float64(count) / float64(pageSize),
-			),
-		)
+		page.TotalPages = count / pageSize
+		if count%pageSize != 0 {
+			page.TotalPages++
+		}
 		err = s.pageCountCache.Put(ctx, chatID, pageSize, page.TotalPages)
 		if err != nil {
 			log.Printf("error while saving alias cache: %v", err)
@@ -113,7 +117,7 @@ func (s *AliasStorage) AliasPage(ctx context.Context, chatID int64, pageNum, pag
 	offset := pageNum * pageSize
 	limit := pageSize
 	const query = `
-	SELECT id, chat_id, path, alias
+	SELECT id, chat_id, path, path_type, alias
 	FROM alias
 	WHERE chat_id = $1
 	OFFSET $2
@@ -121,7 +125,7 @@ func (s *AliasStorage) AliasPage(ctx context.Context, chatID int64, pageNum, pag
 	`
 	rows, err := s.db.QueryContext(ctx, query, chatID, offset, limit)
 	if err != nil {
-		return domain.Page[domain.Alias]{}, fmt.Errorf("%v: querying aliases page: %w: %w", op, domain.ErrDb, err)
+		return zero, fmt.Errorf("%v: querying aliases page: %w: %w", op, domain.ErrDb, err)
 	}
 	templates := make([]domain.Alias, pageSize)
 	cur := 0
@@ -130,11 +134,12 @@ func (s *AliasStorage) AliasPage(ctx context.Context, chatID int64, pageNum, pag
 		err := rows.Scan(
 			&templates[cur].ID,
 			&templates[cur].ChatID,
-			&templates[cur].Path,
+			&templates[cur].Path.Value,
+			&templates[cur].Path.Type,
 			&templates[cur].Alias,
 		)
 		if err != nil {
-			return domain.Page[domain.Alias]{}, fmt.Errorf("%v: scanning alias row: %w: %w", op, domain.ErrDb, err)
+			return zero, fmt.Errorf("%v: scanning alias row: %w: %w", op, domain.ErrDb, err)
 		}
 		cur++
 	}
@@ -149,12 +154,12 @@ func (s *AliasStorage) Alias(ctx context.Context, id string, chatID int64) (doma
 		return domain.Alias{}, fmt.Errorf("%v: parsing alias id: %w: %w", op, domain.ErrBadArgument, err)
 	}
 	const query = `
-	SELECT chat_id, path, alias
+	SELECT chat_id, path, path_type, alias
 	FROM alias
 	WHERE id = $1 AND chat_id = $2
 	`
 	var alias domain.Alias
-	if err := s.db.QueryRowContext(ctx, query, id, chatID).Scan(&alias.ChatID, &alias.Path, &alias.Alias); err != nil {
+	if err := s.db.QueryRowContext(ctx, query, id, chatID).Scan(&alias.ChatID, &alias.Path.Value, &alias.Path.Type, &alias.Alias); err != nil {
 		return domain.Alias{}, fmt.Errorf("%v: querying alias: %w: %w", op, domain.ErrDb, err)
 	}
 

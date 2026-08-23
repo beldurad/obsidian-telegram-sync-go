@@ -6,6 +6,8 @@ import (
 	"github.com/beldurad/obsidian-telegram-sync-go/internal/domain"
 )
 
+var _ domain.RemoteStorage = (*RemoteStorage)(nil)
+
 type RemoteStorage struct {
 	domain.RemoteStorage
 
@@ -15,7 +17,7 @@ type RemoteStorage struct {
 		path string,
 		pageNum int,
 		pageSize int,
-	) (domain.Page[domain.DirElem], error)
+	) (domain.Page[domain.File], error)
 
 	DirectoryCalled bool
 	DirectoryOwner  string
@@ -44,6 +46,42 @@ type RemoteStorage struct {
 	RepoExistsCalled bool
 	RepoExistsOwner  string
 	RepoExistsRepo   string
+
+	CreateNoteFn func(
+		ctx context.Context,
+		owner string,
+		repo string,
+		note domain.Note,
+	) error
+
+	CreateNoteCalled bool
+	CreateNoteOwner  string
+	CreateNoteRepo   string
+	CreatedNote      domain.Note
+
+	FileFn func(
+		ctx context.Context,
+		owner string,
+		repo string,
+		path string,
+	) (domain.File, error)
+
+	FileCalled bool
+	FileOwner  string
+	FileRepo   string
+	FilePath   string
+
+	UpdateNoteFn func(
+		ctx context.Context,
+		owner string,
+		repo string,
+		note domain.Note,
+	) error
+
+	UpdateNoteCalled bool
+	UpdateNoteOwner  string
+	UpdateNoteRepo   string
+	UpdatedNote      domain.Note
 }
 
 func (m *RemoteStorage) Directory(
@@ -52,7 +90,7 @@ func (m *RemoteStorage) Directory(
 	path string,
 	pageNum int,
 	pageSize int,
-) (domain.Page[domain.DirElem], error) {
+) (domain.Page[domain.File], error) {
 	m.DirectoryCalled = true
 	m.DirectoryOwner = owner
 	m.DirectoryRepo = repo
@@ -64,7 +102,61 @@ func (m *RemoteStorage) Directory(
 		return m.DirectoryFn(owner, repo, path, pageNum, pageSize)
 	}
 
-	return domain.Page[domain.DirElem]{}, nil
+	return domain.Page[domain.File]{}, nil
+}
+
+func (m *RemoteStorage) CreateNote(
+	ctx context.Context,
+	owner string,
+	repo string,
+	note domain.Note,
+) error {
+	m.CreateNoteCalled = true
+	m.CreateNoteOwner = owner
+	m.CreateNoteRepo = repo
+	m.CreatedNote = note
+
+	if m.CreateNoteFn != nil {
+		return m.CreateNoteFn(ctx, owner, repo, note)
+	}
+
+	return nil
+}
+
+func (m *RemoteStorage) File(
+	ctx context.Context,
+	owner string,
+	repo string,
+	path string,
+) (domain.File, error) {
+	m.FileCalled = true
+	m.FileOwner = owner
+	m.FileRepo = repo
+	m.FilePath = path
+
+	if m.FileFn != nil {
+		return m.FileFn(ctx, owner, repo, path)
+	}
+
+	return domain.File{}, nil
+}
+
+func (m *RemoteStorage) UpdateNote(
+	ctx context.Context,
+	owner string,
+	repo string,
+	note domain.Note,
+) error {
+	m.UpdateNoteCalled = true
+	m.UpdateNoteOwner = owner
+	m.UpdateNoteRepo = repo
+	m.UpdatedNote = note
+
+	if m.UpdateNoteFn != nil {
+		return m.UpdateNoteFn(ctx, owner, repo, note)
+	}
+
+	return nil
 }
 
 func (m *RemoteStorage) UserInfo() (domain.RemoteUser, error) {

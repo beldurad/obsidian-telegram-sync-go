@@ -15,7 +15,7 @@ const StateWaitingRepo = "WAITING_REPO"
 
 // ===== COMMANDS =====
 
-var CommandConnectGithub = bot.Command("/connect_github")
+const CommandConnectGithub = "/connect_github"
 
 // ===== AUTH =====
 
@@ -37,7 +37,11 @@ func NewAuthHandler(authService AuthService) *AuthHandler {
 }
 
 func (h *AuthHandler) Match(ctx context.Context, s *bot.ChatSession, u bot.Update) bool {
-	return u.Text == string(CommandConnectGithub)
+	if u.Text == CommandConnectGithub {
+		s.ToDefault()
+		return true
+	}
+	return false
 }
 
 func (h *AuthHandler) Handle(ctx context.Context, s *bot.ChatSession, u bot.Update) (resp bot.Response, err error) {

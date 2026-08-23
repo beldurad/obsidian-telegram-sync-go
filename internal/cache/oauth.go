@@ -6,55 +6,51 @@ import (
 
 	"github.com/beldurad/obsidian-telegram-sync-go/foundation/cache"
 	"github.com/beldurad/obsidian-telegram-sync-go/internal/domain"
-	"github.com/beldurad/obsidian-telegram-sync-go/internal/github"
-	"golang.org/x/oauth2"
 )
 
-const defCap = 10_000
-
-type OauthContextStorage struct {
-	lru *cache.LRUCache[string, *github.OAuthContext]
+type RemoteConnectCtxStorage struct {
+	lru *cache.LRUCache[string, domain.RemoteConnectCtx]
 }
 
-func NewOauthContextStorage() *OauthContextStorage {
-	return &OauthContextStorage{
-		lru: cache.NewLRU[string, *github.OAuthContext](defCap),
+func NewRemoteConnectCtxStorage() *RemoteConnectCtxStorage {
+	return &RemoteConnectCtxStorage{
+		lru: cache.NewLRU[string, domain.RemoteConnectCtx](),
 	}
 }
 
-func (s *OauthContextStorage) Save(ctx context.Context, c *github.OAuthContext) error {
+func (s *RemoteConnectCtxStorage) Save(ctx context.Context, c domain.RemoteConnectCtx) error {
 	s.lru.Put(c.State, c)
 	return nil
 }
 
-func (s *OauthContextStorage) ContextByState(ctx context.Context, state string) (*github.OAuthContext, error) {
-	const op = "OauthContextStorage.ContextByState"
+func (s *RemoteConnectCtxStorage) ContextByState(ctx context.Context, state string) (domain.RemoteConnectCtx, error) {
+	const op = "RemoteConnectCtxStorage.ContextByState"
 	oauthCtx, ok := s.lru.Get(state)
 	if !ok {
-		return nil, fmt.Errorf("%v: oauth context not found: %w", op, domain.ErrNotFound)
+		return domain.RemoteConnectCtx{}, fmt.Errorf("%v: oauth context not found: %w", op, domain.ErrNotFound)
 	}
 	return oauthCtx, nil
 }
 
-type OAuthTokenStorage struct {
-	lru *cache.LRUCache[int64, *oauth2.Token]
+type RemoteTokenStorage struct {
+	lru *cache.LRUCache[int64, domain.RemoteToken]
 }
 
-func NewOAuthTokenStorage() *OAuthTokenStorage {
-	return &OAuthTokenStorage{
-		lru: cache.NewLRU[int64, *oauth2.Token](defCap),
+func NewRemoteTokenStorage() *RemoteTokenStorage {
+	return &RemoteTokenStorage{
+		lru: cache.NewLRU[int64, domain.RemoteToken](),
 	}
 }
 
-func (s *OAuthTokenStorage) Save(ctx context.Context, chatID int64, token *oauth2.Token) error {
+func (s *RemoteTokenStorage) Save(ctx context.Context, chatID int64, token domain.RemoteToken) error {
 	s.lru.Put(chatID, token)
 	return nil
 }
-func (s *OAuthTokenStorage) Token(ctx context.Context, chatID int64) (*oauth2.Token, error) {
-	const op = "OAuthTokenStorage.Token"
+func (s *RemoteTokenStorage) Token(ctx context.Context, chatID int64) (domain.RemoteToken, error) {
+	const op = "RemoteTokenStorage.Token"
 	token, ok := s.lru.Get(chatID)
 	if !ok {
-		return nil, fmt.Errorf("%v: token not found: %w", op, domain.ErrNotFound)
+		return domain.RemoteToken{}, fmt.Errorf("%v: token not found: %w", op, domain.ErrNotFound)
 	}
 	return token, nil
 }

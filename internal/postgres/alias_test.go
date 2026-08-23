@@ -121,21 +121,25 @@ func TestAliasStorage_Save_Success(t *testing.T) {
 	alias := domain.Alias{
 		ID:     id,
 		ChatID: 123,
-		Path:   "/notes/test.md",
-		Alias:  "test",
+		Path: domain.Path{
+			Value: "/notes/test.md",
+			Type:  domain.PathTypeFile,
+		},
+		Alias: "test",
 	}
 
 	mock.ExpectBegin()
 
 	mock.ExpectExec(regexp.QuoteMeta(`
-	INSERT INTO alias (id, chat_id, path, alias)
+	INSERT INTO alias (id, chat_id, path, path_type, alias)
 	VALUES
-	($1, $2, $3, $4)
+	($1, $2, $3, $4, $5)
 	`)).
 		WithArgs(
 			id,
 			int64(123),
 			"/notes/test.md",
+			domain.PathTypeFile,
 			"test",
 		).
 		WillReturnResult(sqlmock.NewResult(1, 1))
@@ -166,8 +170,11 @@ func TestAliasStorage_Save_BeginError(t *testing.T) {
 		domain.Alias{
 			ID:     uuid.New(),
 			ChatID: 123,
-			Path:   "/test",
-			Alias:  "test",
+			Path: domain.Path{
+				Value: "/test",
+				Type:  domain.PathTypeFile,
+			},
+			Alias: "test",
 		},
 	)
 
@@ -188,14 +195,15 @@ func TestAliasStorage_Save_ExecError(t *testing.T) {
 	mock.ExpectBegin()
 
 	mock.ExpectExec(regexp.QuoteMeta(`
-	INSERT INTO alias (id, chat_id, path, alias)
+	INSERT INTO alias (id, chat_id, path, path_type, alias)
 	VALUES
-	($1, $2, $3, $4)
+	($1, $2, $3, $4, $5)
 	`)).
 		WithArgs(
 			id,
 			int64(123),
 			"/test",
+			domain.PathTypeFile,
 			"test",
 		).
 		WillReturnError(expectedErr)
@@ -207,8 +215,11 @@ func TestAliasStorage_Save_ExecError(t *testing.T) {
 		domain.Alias{
 			ID:     id,
 			ChatID: 123,
-			Path:   "/test",
-			Alias:  "test",
+			Path: domain.Path{
+				Value: "/test",
+				Type:  domain.PathTypeFile,
+			},
+			Alias: "test",
 		},
 	)
 
@@ -229,14 +240,15 @@ func TestAliasStorage_Save_CommitError(t *testing.T) {
 	mock.ExpectBegin()
 
 	mock.ExpectExec(regexp.QuoteMeta(`
-	INSERT INTO alias (id, chat_id, path, alias)
+	INSERT INTO alias (id, chat_id, path, path_type, alias)
 	VALUES
-	($1, $2, $3, $4)
+	($1, $2, $3, $4, $5)
 	`)).
 		WithArgs(
 			id,
 			int64(123),
 			"/test",
+			domain.PathTypeFile,
 			"test",
 		).
 		WillReturnResult(sqlmock.NewResult(1, 1))
@@ -249,8 +261,11 @@ func TestAliasStorage_Save_CommitError(t *testing.T) {
 		domain.Alias{
 			ID:     id,
 			ChatID: 123,
-			Path:   "/test",
-			Alias:  "test",
+			Path: domain.Path{
+				Value: "/test",
+				Type:  domain.PathTypeFile,
+			},
+			Alias: "test",
 		},
 	)
 
@@ -279,14 +294,15 @@ func TestAliasStorage_Save_CacheDeleteError(t *testing.T) {
 	mock.ExpectBegin()
 
 	mock.ExpectExec(regexp.QuoteMeta(`
-	INSERT INTO alias (id, chat_id, path, alias)
+	INSERT INTO alias (id, chat_id, path, path_type, alias)
 	VALUES
-	($1, $2, $3, $4)
+	($1, $2, $3, $4, $5)
 	`)).
 		WithArgs(
 			id,
 			int64(123),
 			"/test",
+			domain.PathTypeFile,
 			"test",
 		).
 		WillReturnResult(sqlmock.NewResult(1, 1))
@@ -298,8 +314,11 @@ func TestAliasStorage_Save_CacheDeleteError(t *testing.T) {
 		domain.Alias{
 			ID:     id,
 			ChatID: 123,
-			Path:   "/test",
-			Alias:  "test",
+			Path: domain.Path{
+				Value: "/test",
+				Type:  domain.PathTypeFile,
+			},
+			Alias: "test",
 		},
 	)
 
@@ -361,23 +380,25 @@ func TestAliasStorage_AliasPage_CacheHit(t *testing.T) {
 	}
 
 	rows := sqlmock.NewRows(
-		[]string{"id", "chat_id", "path", "alias"},
+		[]string{"id", "chat_id", "path", "path_type", "alias"},
 	).
 		AddRow(
 			id1,
 			int64(123),
 			"/a.md",
+			domain.PathTypeFile,
 			"a",
 		).
 		AddRow(
 			id2,
 			int64(123),
 			"/b.md",
+			domain.PathTypeFile,
 			"b",
 		)
 
 	mock.ExpectQuery(regexp.QuoteMeta(`
-	SELECT id, chat_id, path, alias
+	SELECT id, chat_id, path, path_type, alias
 	FROM alias
 	WHERE chat_id = $1
 	OFFSET $2
@@ -407,15 +428,21 @@ func TestAliasStorage_AliasPage_CacheHit(t *testing.T) {
 	require.Equal(t, domain.Alias{
 		ID:     id1,
 		ChatID: 123,
-		Path:   "/a.md",
-		Alias:  "a",
+		Path: domain.Path{
+			Value: "/a.md",
+			Type:  domain.PathTypeFile,
+		},
+		Alias: "a",
 	}, page.Values[0])
 
 	require.Equal(t, domain.Alias{
 		ID:     id2,
 		ChatID: 123,
-		Path:   "/b.md",
-		Alias:  "b",
+		Path: domain.Path{
+			Value: "/b.md",
+			Type:  domain.PathTypeFile,
+		},
+		Alias: "b",
 	}, page.Values[1])
 
 	require.False(t, cache.putCalled)
@@ -448,7 +475,7 @@ func TestAliasStorage_AliasPage_CacheMiss(t *testing.T) {
 		)
 
 	mock.ExpectQuery(regexp.QuoteMeta(`
-	SELECT id, chat_id, path, alias
+	SELECT id, chat_id, path, path_type, alias
 	FROM alias
 	WHERE chat_id = $1
 	OFFSET $2
@@ -461,12 +488,13 @@ func TestAliasStorage_AliasPage_CacheMiss(t *testing.T) {
 		).
 		WillReturnRows(
 			sqlmock.NewRows(
-				[]string{"id", "chat_id", "path", "alias"},
+				[]string{"id", "chat_id", "path", "path_type", "alias"},
 			).
 				AddRow(
 					id,
 					int64(123),
 					"/test.md",
+					domain.PathTypeFile,
 					"test",
 				),
 		)
@@ -567,7 +595,7 @@ func TestAliasStorage_AliasPage_CachePutError(t *testing.T) {
 		)
 
 	mock.ExpectQuery(regexp.QuoteMeta(`
-	SELECT id, chat_id, path, alias
+	SELECT id, chat_id, path, path_type, alias
 	FROM alias
 	WHERE chat_id = $1
 	OFFSET $2
@@ -580,7 +608,7 @@ func TestAliasStorage_AliasPage_CachePutError(t *testing.T) {
 		).
 		WillReturnRows(
 			sqlmock.NewRows(
-				[]string{"id", "chat_id", "path", "alias"},
+				[]string{"id", "chat_id", "path", "path_type", "alias"},
 			),
 		)
 
@@ -614,7 +642,7 @@ func TestAliasStorage_AliasPage_QueryError(t *testing.T) {
 	}
 
 	mock.ExpectQuery(regexp.QuoteMeta(`
-	SELECT id, chat_id, path, alias
+	SELECT id, chat_id, path, path_type, alias
 	FROM alias
 	WHERE chat_id = $1
 	OFFSET $2
@@ -648,7 +676,7 @@ func TestAliasStorage_Alias_Success(t *testing.T) {
 	id := uuid.New()
 
 	mock.ExpectQuery(regexp.QuoteMeta(`
-	SELECT chat_id, path, alias
+	SELECT chat_id, path, path_type, alias
 	FROM alias
 	WHERE id = $1 AND chat_id = $2
 	`)).
@@ -658,11 +686,12 @@ func TestAliasStorage_Alias_Success(t *testing.T) {
 		).
 		WillReturnRows(
 			sqlmock.NewRows(
-				[]string{"chat_id", "path", "alias"},
+				[]string{"chat_id", "path", "path_type", "alias"},
 			).
 				AddRow(
 					int64(123),
 					"/notes/test.md",
+					domain.PathTypeFile,
 					"test",
 				),
 		)
@@ -678,8 +707,11 @@ func TestAliasStorage_Alias_Success(t *testing.T) {
 	require.Equal(t, domain.Alias{
 		ID:     id,
 		ChatID: 123,
-		Path:   "/notes/test.md",
-		Alias:  "test",
+		Path: domain.Path{
+			Value: "/notes/test.md",
+			Type:  domain.PathTypeFile,
+		},
+		Alias: "test",
 	}, result)
 
 	require.NoError(t, mock.ExpectationsWereMet())
@@ -707,7 +739,7 @@ func TestAliasStorage_Alias_QueryError(t *testing.T) {
 	expectedErr := errors.New("query error")
 
 	mock.ExpectQuery(regexp.QuoteMeta(`
-	SELECT chat_id, path, alias
+	SELECT chat_id, path, path_type, alias
 	FROM alias
 	WHERE id = $1 AND chat_id = $2
 	`)).
@@ -737,7 +769,7 @@ func TestAliasStorage_Alias_ScanError(t *testing.T) {
 	id := uuid.New()
 
 	mock.ExpectQuery(regexp.QuoteMeta(`
-	SELECT chat_id, path, alias
+	SELECT chat_id, path, path_type, alias
 	FROM alias
 	WHERE id = $1 AND chat_id = $2
 	`)).
@@ -747,11 +779,12 @@ func TestAliasStorage_Alias_ScanError(t *testing.T) {
 		).
 		WillReturnRows(
 			sqlmock.NewRows(
-				[]string{"chat_id", "path", "alias"},
+				[]string{"chat_id", "path", "path_type", "alias"},
 			).
 				AddRow(
 					"not-an-int64",
 					"/test.md",
+					domain.PathTypeFile,
 					"test",
 				),
 		)

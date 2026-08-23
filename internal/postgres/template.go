@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"math"
 
 	"github.com/beldurad/obsidian-telegram-sync-go/internal/domain"
 	"github.com/google/uuid"
@@ -78,13 +77,15 @@ func (s *TemplateStorage) Save(ctx context.Context, t domain.Template) (err erro
 
 func (s *TemplateStorage) TemplatesPage(ctx context.Context, chatID int64, pageNum, pageSize int) (domain.Page[domain.Template], error) {
 	const op = "TemplateStorage.TemplatesPage"
+	var zero domain.Page[domain.Template]
+
 	if pageNum < 0 || pageSize < 0 {
-		return domain.Page[domain.Template]{}, domain.ErrBadArgument
+		return zero, domain.ErrBadArgument
 	}
 	if pageSize == 0 {
-		return domain.Page[domain.Template]{}, nil
+		return zero, nil
 	}
-	page := domain.Page[domain.Template]{}
+	page := domain.Page[domain.Template]{CurPage: pageNum}
 	page.CurPage = pageNum
 
 	if pageNum, ok := s.pageCountCache.Get(ctx, chatID, pageSize); ok {
@@ -101,13 +102,12 @@ func (s *TemplateStorage) TemplatesPage(ctx context.Context, chatID int64, pageN
 			countQuery, chatID,
 		).Scan(&count)
 		if err != nil {
-			return page, fmt.Errorf("%v: counting templates: %w: %w", op, domain.ErrDb, err)
+			return zero, fmt.Errorf("%v: counting templates: %w: %w", op, domain.ErrDb, err)
 		}
-		page.TotalPages = int(
-			math.Ceil(
-				float64(count) / float64(pageSize),
-			),
-		)
+		page.TotalPages = count / pageSize
+		if count%pageSize != 0 {
+			page.TotalPages++
+		}
 		err = s.pageCountCache.Put(ctx, chatID, pageSize, page.TotalPages)
 		if err != nil {
 			log.Printf("error while saving template cache: %v", err)
@@ -124,7 +124,7 @@ func (s *TemplateStorage) TemplatesPage(ctx context.Context, chatID int64, pageN
 	`
 	rows, err := s.db.QueryContext(ctx, query, chatID, offset, limit)
 	if err != nil {
-		return domain.Page[domain.Template]{}, fmt.Errorf("%v: querying templates page: %w: %w", op, domain.ErrDb, err)
+		return zero, fmt.Errorf("%v: querying templates page: %w: %w", op, domain.ErrDb, err)
 	}
 	templates := make([]domain.Template, pageSize)
 	cur := 0
@@ -137,7 +137,7 @@ func (s *TemplateStorage) TemplatesPage(ctx context.Context, chatID int64, pageN
 			&templates[cur].Value,
 		)
 		if err != nil {
-			return domain.Page[domain.Template]{}, fmt.Errorf("%v: scanning template row: %w: %w", op, domain.ErrDb, err)
+			return zero, fmt.Errorf("%v: scanning template row: %w: %w", op, domain.ErrDb, err)
 		}
 		cur++
 	}

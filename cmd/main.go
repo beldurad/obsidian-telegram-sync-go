@@ -13,8 +13,8 @@ import (
 
 	"github.com/beldurad/obsidian-telegram-sync-go/internal/bot"
 	"github.com/beldurad/obsidian-telegram-sync-go/internal/cache"
+	appgithub "github.com/beldurad/obsidian-telegram-sync-go/internal/client/github"
 	"github.com/beldurad/obsidian-telegram-sync-go/internal/config"
-	appgithub "github.com/beldurad/obsidian-telegram-sync-go/internal/github"
 	"github.com/beldurad/obsidian-telegram-sync-go/internal/http"
 	"github.com/beldurad/obsidian-telegram-sync-go/internal/postgres"
 	"golang.org/x/oauth2"
@@ -29,13 +29,14 @@ func main() {
 
 	aliasPageCountCache := cache.NewPageCountCache()
 	templatePageCountCache := cache.NewPageCountCache()
+	remoteContentCache := cache.NewRemoteContentCache()
 
 	aliasStorage := postgres.NewAliasStorage(db, aliasPageCountCache)
 	templateStorage := postgres.NewTemplateStorage(db, templatePageCountCache)
 	userVaultStorage := postgres.NewUserVaultStorage(db)
 
-	oauthTokenStorage := cache.NewOAuthTokenStorage()
-	oauthContextStorage := cache.NewOauthContextStorage()
+	oauthTokenStorage := cache.NewRemoteTokenStorage()
+	oauthContextStorage := cache.NewRemoteConnectCtxStorage()
 
 	oauthCfg := oauth2.Config{
 		ClientID:     cfg.ClientID,
@@ -45,7 +46,7 @@ func main() {
 		Scopes:       strings.Split(cfg.Scopes, " "),
 	}
 
-	oauthService := appgithub.NewOAuthService(&oauthCfg, oauthContextStorage, oauthTokenStorage)
+	oauthService := appgithub.NewOAuthService(&oauthCfg, oauthContextStorage, oauthTokenStorage, remoteContentCache)
 
 	startHandler := bot.NewStartHandler()
 	aliasGetHandler := bot.NewGetAliasesHandler(aliasStorage)
@@ -62,7 +63,7 @@ func main() {
 		Level: slog.LevelDebug,
 	}))
 
-	b := bot.Init(cfg.TelegramConfig, sessionService, logger)
+	b := bot.Init(cfg, sessionService, logger)
 	b.AddHandler(startHandler)
 	b.AddHandler(aliasGetHandler)
 	b.AddHandler(aliasAddHandler)

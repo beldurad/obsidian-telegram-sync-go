@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
+	"net/url"
 
 	"github.com/beldurad/obsidian-telegram-sync-go/foundation/bot"
 	"github.com/beldurad/obsidian-telegram-sync-go/internal/domain"
@@ -13,17 +13,17 @@ import (
 
 // ===== STATES =====
 
-var (
-	StateNoteWaitAlias    = bot.ChatState("NOTE_WAITING_ALIAS")
-	StateNoteWaitTemplate = bot.ChatState("NOTE_WAITING_TEMPLATE")
-	StateNoteWaitText     = bot.ChatState("NOTE_WAITING_TEXT")
-	StateNoteWaitFilename = bot.ChatState("NOTE_WAITING_FILENAME")
+const (
+	StateNoteWaitAlias    = "NOTE_WAITING_ALIAS"
+	StateNoteWaitTemplate = "NOTE_WAITING_TEMPLATE"
+	StateNoteWaitText     = "NOTE_WAITING_TEXT"
+	StateNoteWaitFilename = "NOTE_WAITING_FILENAME"
 )
 
 // ===== COMMANDS =====
 
 const (
-	CommandAddNote = "/add-note"
+	CommandAddNote = "/add_note"
 )
 
 // ===== ADD NOTE =====
@@ -39,7 +39,8 @@ type TemplateService interface {
 }
 
 type noteAddPayload struct {
-	Path         string      `json:"alias"`
+	Path         string      `json:"path"`
+	PathType     string      `json:"path_type"`
 	AliasPage    pagePayload `json:"alias_page"`
 	Template     string      `json:"template"`
 	TemplatePage pagePayload `json:"template_page"`
@@ -74,11 +75,14 @@ func NewAddNoteHandler(aliasService AliasService, templateService TemplateServic
 
 func (a *AddNoteHandler) Match(ctx context.Context, s *bot.ChatSession, u bot.Update) bool {
 	state := s.State()
-	return u.Text == CommandAddNote ||
-		state == StateNoteWaitAlias ||
-		state == StateNoteWaitFilename ||
-		state == StateNoteWaitTemplate ||
-		state == StateNoteWaitText
+	if u.Text == CommandAddNote {
+		s.ToDefault()
+		return true
+	}
+	return (state == StateNoteWaitAlias && u.CallbackData != "") ||
+		(state == StateNoteWaitFilename && u.CallbackData != "") ||
+		(state == StateNoteWaitTemplate && u.CallbackData != "") ||
+		(state == StateNoteWaitText && u.Text != "")
 }
 
 func (a *AddNoteHandler) Handle(ctx context.Context, s *bot.ChatSession, u bot.Update) (resp bot.Response, err error) {
@@ -114,37 +118,48 @@ func (a *AddNoteHandler) handleWaitAlias(ctx context.Context, s *bot.ChatSession
 
 	state := s.State()
 	payload := pagePayload{}
-	if state != bot.DefaultChatState {
+	if state == StateNoteWaitAlias {
 		raw := s.Payload()
 		err := json.Unmarshal(raw, &payload)
 		if err != nil {
 			return bot.Response{}, fmt.Errorf("%v: unmarshaling payload: %w", op, err)
 		}
 	}
-	if u.CallbackData == NextPageCommand {
+	if u.CallbackData == NextPageCallback {
 		payload.PageNum++
-	} else if u.CallbackData == PrevPageCommand {
+	} else if u.CallbackData == PrevPageCallback {
 		payload.PageNum--
-	} else if state != bot.DefaultChatState {
+	} else if state == StateNoteWaitAlias {
 		alias, err := a.aliasService.Alias(ctx, u.CallbackData, u.ChatID)
 		if err != nil {
 			return bot.Response{}, fmt.Errorf("%v: getting alias: %w", op, err)
 		}
 
 		notePayload := noteAddPayload{
-			Path: alias.Path,
+			Path:     alias.Path.Value,
+			PathType: alias.Path.Type,
 		}
 		bytes, err := json.Marshal(notePayload)
 		if err != nil {
 			return bot.Response{}, fmt.Errorf("%v: marshaling note payload: %w", op, err)
 		}
 
-		buttons, err := a.templateButtons(ctx, s, 0)
+		templates, err := a.templateService.TemplatesPage(ctx, u.ChatID, 0, domain.DefaultPageSize)
+		if err != nil {
+			return bot.Response{}, fmt.Errorf("%v: getting templates: %w", op, err)
+		}
+		if templates.TotalPages == 0 {
+			s.ToDefault()
+			return bot.Response{
+				Message: tgbotapi.NewEditMessageText(u.ChatID, s.LastBotMessageID(),
+					fmt.Sprintf("Шаблонов нет, добавьте через %s", CommandAddTemplate),
+				),
+			}, nil
+		}
+
+		buttons := a.templateButtons(templates)
 		msgCfg := tgbotapi.NewEditMessageText(u.ChatID, s.LastBotMessageID(), "Выберите шаблон")
 		msgCfg.ReplyMarkup = &buttons
-		if err != nil {
-			return bot.Response{}, fmt.Errorf("%v: getting template buttons: %w", op, err)
-		}
 
 		s.SetState(StateNoteWaitTemplate)
 		s.SetPayload(bytes)
@@ -152,15 +167,24 @@ func (a *AddNoteHandler) handleWaitAlias(ctx context.Context, s *bot.ChatSession
 			Message: msgCfg,
 		}, nil
 	}
-
-	buttons, err := a.aliasButtons(ctx, s, payload.PageNum)
+	aliases, err := a.aliasService.AliasPage(ctx, s.ChatID(), payload.PageNum, domain.DefaultPageSize)
 	if err != nil {
-		return bot.Response{}, fmt.Errorf("%v: getting alias buttons: %w", op, err)
+		return bot.Response{}, fmt.Errorf("%v: getting aliases page: %w", op, err)
 	}
+	if aliases.TotalPages == 0 {
+		s.ToDefault()
+		return bot.Response{
+			Message: tgbotapi.NewMessage(
+				u.ChatID,
+				fmt.Sprintf("У вас нет алиасов, добавьте с помощью %s", CommandAddAlias),
+			),
+		}, nil
+	}
+	buttons := a.aliasButtons(aliases)
 
 	var c tgbotapi.Chattable
 
-	if state == bot.DefaultChatState {
+	if state != StateNoteWaitAlias {
 		msgCfg := tgbotapi.NewMessage(u.ChatID, "Выберите путь")
 		msgCfg.ReplyMarkup = buttons
 		c = msgCfg
@@ -173,6 +197,7 @@ func (a *AddNoteHandler) handleWaitAlias(ctx context.Context, s *bot.ChatSession
 		return bot.Response{}, fmt.Errorf("%v: marshaling payload: %w", op, err)
 	}
 
+	s.SetState(StateNoteWaitAlias)
 	s.SetPayload(bytes)
 	return bot.Response{
 		Message: c,
@@ -180,14 +205,10 @@ func (a *AddNoteHandler) handleWaitAlias(ctx context.Context, s *bot.ChatSession
 
 }
 
-func (a *AddNoteHandler) aliasButtons(ctx context.Context, s *bot.ChatSession, pageNum int) (tgbotapi.InlineKeyboardMarkup, error) {
+func (a *AddNoteHandler) aliasButtons(page domain.Page[domain.Alias]) tgbotapi.InlineKeyboardMarkup {
 	const op = "aliasButtons"
-	aliases, err := a.aliasService.AliasPage(ctx, s.ChatID(), pageNum, domain.DefaultPageSize)
-	if err != nil {
-		return tgbotapi.InlineKeyboardMarkup{}, fmt.Errorf("%v: getting aliases page: %w", op, err)
-	}
 	buttons := make([][]tgbotapi.InlineKeyboardButton, 0)
-	for _, alias := range aliases.Values {
+	for _, alias := range page.Values {
 		buttons = append(buttons, []tgbotapi.InlineKeyboardButton{
 			tgbotapi.NewInlineKeyboardButtonData(
 				alias.Alias,
@@ -195,25 +216,25 @@ func (a *AddNoteHandler) aliasButtons(ctx context.Context, s *bot.ChatSession, p
 			),
 		})
 	}
-	if aliases.HasNext() {
+	if page.HasNext() {
 		buttons = append(buttons, []tgbotapi.InlineKeyboardButton{
 			tgbotapi.NewInlineKeyboardButtonData(
 				"Next",
-				NextPageCommand,
+				NextPageCallback,
 			),
 		})
 	}
-	if aliases.HasPrev() {
+	if page.HasPrev() {
 		buttons = append(buttons, []tgbotapi.InlineKeyboardButton{
 			tgbotapi.NewInlineKeyboardButtonData(
 				"Prev",
-				PrevPageCommand,
+				PrevPageCallback,
 			),
 		})
 	}
 	return tgbotapi.InlineKeyboardMarkup{
 		InlineKeyboard: buttons,
-	}, nil
+	}
 }
 
 func (a *AddNoteHandler) handleWaitTemplate(ctx context.Context, s *bot.ChatSession, u bot.Update) (bot.Response, error) {
@@ -229,11 +250,11 @@ func (a *AddNoteHandler) handleWaitTemplate(ctx context.Context, s *bot.ChatSess
 
 	payload := &notePayload.TemplatePage
 
-	if u.Raw.CallbackData() == NextPageCommand {
+	if u.Raw.CallbackData() == NextPageCallback {
 		payload.PageNum++
-	} else if u.Raw.CallbackData() == PrevPageCommand {
+	} else if u.Raw.CallbackData() == PrevPageCallback {
 		payload.PageNum--
-	} else if s.State() != bot.DefaultChatState {
+	} else if s.State() == StateNoteWaitTemplate {
 		template, err := a.templateService.Template(ctx, u.Raw.CallbackData(), u.ChatID)
 		if err != nil {
 			return bot.Response{}, fmt.Errorf("%v: getting template: %w", op, err)
@@ -255,10 +276,20 @@ func (a *AddNoteHandler) handleWaitTemplate(ctx context.Context, s *bot.ChatSess
 		}, nil
 	}
 
-	buttons, err := a.templateButtons(ctx, s, payload.PageNum)
+	templates, err := a.templateService.TemplatesPage(ctx, u.ChatID, payload.PageNum, domain.DefaultPageSize)
 	if err != nil {
-		return bot.Response{}, fmt.Errorf("%v: getting template buttons: %w", op, err)
+		return bot.Response{}, fmt.Errorf("%v: error getting template page: %w", op, err)
 	}
+	if templates.TotalPages == 0 {
+		s.ToDefault()
+		return bot.Response{
+			Message: tgbotapi.NewEditMessageText(u.ChatID, s.LastBotMessageID(),
+				fmt.Sprintf("Шаблонов нет, добавьте через %s", CommandAddTemplate),
+			),
+		}, nil
+	}
+
+	buttons := a.templateButtons(templates)
 
 	msgCfg := tgbotapi.NewEditMessageTextAndMarkup(u.ChatID, s.LastBotMessageID(), "Выберите путь", buttons)
 	bytes, err := json.Marshal(notePayload)
@@ -272,14 +303,10 @@ func (a *AddNoteHandler) handleWaitTemplate(ctx context.Context, s *bot.ChatSess
 	}, nil
 }
 
-func (a *AddNoteHandler) templateButtons(ctx context.Context, s *bot.ChatSession, pageNum int) (tgbotapi.InlineKeyboardMarkup, error) {
+func (a *AddNoteHandler) templateButtons(page domain.Page[domain.Template]) tgbotapi.InlineKeyboardMarkup {
 	const op = "templateButtons"
-	templates, err := a.templateService.TemplatesPage(ctx, s.ChatID(), pageNum, domain.DefaultPageSize)
-	if err != nil {
-		return tgbotapi.InlineKeyboardMarkup{}, fmt.Errorf("%v: getting templates page: %w", op, err)
-	}
 	buttons := make([][]tgbotapi.InlineKeyboardButton, 0)
-	for _, template := range templates.Values {
+	for _, template := range page.Values {
 		buttons = append(buttons, []tgbotapi.InlineKeyboardButton{
 			tgbotapi.NewInlineKeyboardButtonData(
 				template.Name,
@@ -287,26 +314,30 @@ func (a *AddNoteHandler) templateButtons(ctx context.Context, s *bot.ChatSession
 			),
 		})
 	}
-	if templates.HasNext() {
-		buttons = append(buttons, []tgbotapi.InlineKeyboardButton{
+	paginationRow := tgbotapi.NewInlineKeyboardRow()
+	if page.HasPrev() {
+		paginationRow = append(paginationRow,
 			tgbotapi.NewInlineKeyboardButtonData(
-				"Next",
-				NextPageCommand,
+				PrevPageButtonText,
+				PrevPageCallback,
 			),
-		})
+		)
 	}
-	if templates.HasPrev() {
-		buttons = append(buttons, []tgbotapi.InlineKeyboardButton{
+	if page.HasNext() {
+		paginationRow = append(paginationRow,
 			tgbotapi.NewInlineKeyboardButtonData(
-				"Prev",
-				PrevPageCommand,
+				NextPageButtonText,
+				NextPageCallback,
 			),
-		})
+		)
+	}
+	if len(paginationRow) != 0 {
+		buttons = append(buttons, paginationRow)
 	}
 
 	return tgbotapi.InlineKeyboardMarkup{
 		InlineKeyboard: buttons,
-	}, nil
+	}
 }
 
 func (a *AddNoteHandler) handleWaitText(ctx context.Context, s *bot.ChatSession, u bot.Update) (bot.Response, error) {
@@ -318,19 +349,8 @@ func (a *AddNoteHandler) handleWaitText(ctx context.Context, s *bot.ChatSession,
 		return bot.Response{}, fmt.Errorf("%v: unmarshaling payload: %w", op, err)
 	}
 	notePayload.Text = u.Text
-	note := notePayload.toNote()
 
-	client, err := a.client.Client(ctx, u.ChatID)
-	if err != nil {
-		return bot.Response{}, fmt.Errorf("%v: getting client: %w", op, err)
-	}
-	vault, err := a.vault.Vault(ctx, u.ChatID)
-	if err != nil {
-		return bot.Response{}, fmt.Errorf("%v: getting vault: %w", op, err)
-	}
-
-	file, err := client.File(vault.Owner, vault.Repo, note.Path)
-	if err != nil || file.Type != domain.TypeFile {
+	if notePayload.PathType == domain.PathTypeDir {
 		bytes, err := json.Marshal(notePayload)
 		if err != nil {
 			return bot.Response{}, fmt.Errorf("%v: marshaling payload: %w", op, err)
@@ -344,10 +364,21 @@ func (a *AddNoteHandler) handleWaitText(ctx context.Context, s *bot.ChatSession,
 		}, nil
 	}
 
-	if err := a.saveNote(ctx, u.ChatID, note); err != nil {
-		return bot.Response{}, fmt.Errorf("%v: saving note: %w", op, err)
+	note := notePayload.toNote()
+
+	client, err := a.client.Client(ctx, u.ChatID)
+	if err != nil {
+		return bot.Response{}, fmt.Errorf("%v: getting client: %w", op, err)
 	}
-	msgCfg := tgbotapi.NewMessage(u.ChatID, "Заметка успешно сохранена")
+	vault, err := a.vault.Vault(ctx, u.ChatID)
+	if err != nil {
+		return bot.Response{}, fmt.Errorf("%v: getting vault: %w", op, err)
+	}
+
+	if err := client.UpdateNote(ctx, vault.Owner, vault.Repo, note); err != nil {
+		return bot.Response{}, fmt.Errorf("%v: updating note: %w", op, err)
+	}
+	msgCfg := tgbotapi.NewMessage(u.ChatID, "Заметка успешно обновлена")
 
 	s.ToDefault()
 	return bot.Response{
@@ -364,11 +395,25 @@ func (a *AddNoteHandler) handleWaitFilename(ctx context.Context, s *bot.ChatSess
 		return bot.Response{}, fmt.Errorf("%v: unmarshaling payload: %w", op, err)
 	}
 
-	notePayload.Path = strings.TrimSuffix(notePayload.Path, "/")
-	if notePayload.Path != "" {
-		notePayload.Path += "/"
+	fullPath, err := url.JoinPath(notePayload.Path, u.Text)
+	if err != nil {
+		return bot.Response{}, fmt.Errorf("%v: adding filename to path: %w", op, err)
 	}
-	notePayload.Path += u.Text
+	notePayload.Path = fullPath
+
+	note := notePayload.toNote()
+	client, err := a.client.Client(ctx, u.ChatID)
+	if err != nil {
+		return bot.Response{}, fmt.Errorf("%v: getting client: %w", op, err)
+	}
+	vault, err := a.vault.Vault(ctx, u.ChatID)
+	if err != nil {
+		return bot.Response{}, fmt.Errorf("%v: getting vault: %w", op, err)
+	}
+
+	if err := client.CreateNote(ctx, vault.Owner, vault.Repo, note); err != nil {
+		return bot.Response{}, fmt.Errorf("%v: creating note: %w", op, err)
+	}
 
 	msgCfg := tgbotapi.NewMessage(u.ChatID, "Заметка успешно сохранена")
 
@@ -376,20 +421,4 @@ func (a *AddNoteHandler) handleWaitFilename(ctx context.Context, s *bot.ChatSess
 	return bot.Response{
 		Message: msgCfg,
 	}, nil
-}
-
-func (a *AddNoteHandler) saveNote(ctx context.Context, chatID int64, note domain.Note) error {
-	const op = "saveNote"
-	client, err := a.client.Client(ctx, chatID)
-	if err != nil {
-		return fmt.Errorf("%v: getting client: %w", op, err)
-	}
-	vault, err := a.vault.Vault(ctx, chatID)
-	if err != nil {
-		return fmt.Errorf("%v: getting vault: %w", op, err)
-	}
-	if err := client.SaveNote(ctx, vault.Owner, vault.Repo, note); err != nil {
-		return fmt.Errorf("%v: saving note: %w", op, err)
-	}
-	return nil
 }

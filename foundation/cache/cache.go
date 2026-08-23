@@ -1,33 +1,57 @@
 package cache
 
-import "sync"
+import (
+	"sync"
+	"time"
+)
+
+const defaultCapacity = 10_000
 
 type LRUCache[K comparable, V any] struct {
 	cacheMap map[K]*cacheNode[K, V]
 	capacity int
 	head     *cacheNode[K, V]
 	tail     *cacheNode[K, V]
-
-	mu *sync.Mutex
+	ttl      time.Duration
+	mu       *sync.Mutex
 }
 
 type cacheNode[K comparable, V any] struct {
-	key   K
-	value V
-	prev  *cacheNode[K, V]
-	next  *cacheNode[K, V]
+	key       K
+	value     V
+	createdAt time.Time
+	prev      *cacheNode[K, V]
+	next      *cacheNode[K, V]
 }
 
-func NewLRU[K comparable, V any](capacity int) *LRUCache[K, V] {
+type option[K comparable, V any] func(*LRUCache[K, V])
+
+func WithCapacity[K comparable, V any](capacity int) option[K, V] {
+	return option[K, V](func(l *LRUCache[K, V]) {
+		l.capacity = capacity
+	})
+}
+
+func WithTTL[K comparable, V any](ttl time.Duration) option[K, V] {
+	return option[K, V](func(l *LRUCache[K, V]) {
+		l.ttl = ttl
+	})
+}
+
+func NewLRU[K comparable, V any](opts ...option[K, V]) *LRUCache[K, V] {
 	lruCache := new(LRUCache[K, V])
-	lruCache.capacity = capacity
+	lruCache.capacity = defaultCapacity
 	lruCache.cacheMap = make(map[K]*cacheNode[K, V])
 	lruCache.mu = &sync.Mutex{}
+	for _, opt := range opts {
+		opt(lruCache)
+	}
 	return lruCache
 }
 
 func (c *LRUCache[K, V]) Get(key K) (value V, ok bool) {
 	var zero V
+	var zeroTTL time.Duration
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	node, ok := c.cacheMap[key]
@@ -36,6 +60,10 @@ func (c *LRUCache[K, V]) Get(key K) (value V, ok bool) {
 	}
 
 	c.delete(key)
+	if c.ttl != zeroTTL && node.createdAt.Add(c.ttl).Before(time.Now()) {
+		return zero, false
+	}
+	node.createdAt = time.Now()
 	c.insert(node)
 	return node.value, true
 }
@@ -49,8 +77,9 @@ func (c *LRUCache[K, V]) Put(key K, value V) {
 	}
 	c.delete(key)
 	node := &cacheNode[K, V]{
-		key:   key,
-		value: value,
+		key:       key,
+		value:     value,
+		createdAt: time.Now(),
 	}
 	c.insert(node)
 }
