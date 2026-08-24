@@ -3,7 +3,6 @@ package telegram
 import (
 	"fmt"
 
-	"github.com/beldurad/obsidian-telegram-sync-go/internal/config"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
@@ -12,14 +11,14 @@ type Client struct {
 	webhookEndpoint string
 }
 
-func New(cfg config.Config) (*Client, error) {
+func New(token string, webhookURL string, webhookEndpoint string) (*Client, error) {
 	const op = "telegram.New"
-	bot, err := tgbotapi.NewBotAPI(cfg.Token)
+	bot, err := tgbotapi.NewBotAPI(token)
 	if err != nil {
 		return nil, fmt.Errorf("%v: creating bot api client: %w", op, err)
 	}
 
-	webhook, err := tgbotapi.NewWebhook(cfg.WebhookURL)
+	webhook, err := tgbotapi.NewWebhook(webhookURL)
 	if err != nil {
 		return nil, fmt.Errorf("%v: creating webhook: %w", op, err)
 	}
@@ -31,7 +30,7 @@ func New(cfg config.Config) (*Client, error) {
 
 	return &Client{
 		bot:             bot,
-		webhookEndpoint: cfg.WebhookEndpoint,
+		webhookEndpoint: webhookEndpoint,
 	}, nil
 }
 

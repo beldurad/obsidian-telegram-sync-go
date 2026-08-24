@@ -1,8 +1,10 @@
 package config
 
 import (
-	"log"
+	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/ilyakaznacheev/cleanenv"
 )
@@ -47,30 +49,63 @@ type TLSConfig struct {
 	KeyFile  string `yaml:"key_file"`
 }
 
-func getenv(key string) string {
-	v := os.Getenv(key)
-	if v == "" {
-		log.Fatalf("%v not set", key)
-		return ""
-	}
-	return v
-}
-
-func MustLoad() Config {
+func Load() (Config, error) {
 	configPath := os.Getenv("CONFIG_PATH")
 	if configPath == "" {
-		log.Fatal("CONFIG_PATH is not set")
+		return Config{}, fmt.Errorf("CONFIG_PATH is not set")
 	}
 
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
-		log.Fatalf("config file does not exist: %s", configPath)
+		return Config{}, fmt.Errorf("config file does not exist: %s", configPath)
 	}
 
 	var cfg Config
 
 	if err := cleanenv.ReadConfig(configPath, &cfg); err != nil {
-		log.Fatalf("cannot read config: %s", configPath)
+		return Config{}, fmt.Errorf("cannot read config: %s", configPath)
 	}
 
-	return cfg
+	if err := loadSecrets(&cfg); err != nil {
+		return Config{}, err
+	}
+
+	return cfg, nil
+}
+
+func loadSecrets(cfg *Config) error {
+	dir := os.Getenv("SECRETS_DIR")
+	if dir == "" {
+		dir = cfg.SecretsDir
+	}
+	if dir == "" {
+		return fmt.Errorf("SECRETS_DIR is not set")
+	}
+	readSecret := func(name string) (string, error) {
+		content, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			return "", fmt.Errorf("cannot read secret %s: %v", name, err)
+		}
+		return strings.TrimSpace(string(content)), nil
+	}
+	dbPass, err := readSecret("db_pass")
+	if err != nil {
+		return err
+	}
+	tgToken, err := readSecret("tg_token")
+	if err != nil {
+		return err
+	}
+	githubClientID, err := readSecret("github_id")
+	if err != nil {
+		return err
+	}
+	githubClientSecret, err := readSecret("github_secret")
+	if err != nil {
+		return err
+	}
+	cfg.DatabaseConfig.Password = dbPass
+	cfg.TelegramConfig.Token = tgToken
+	cfg.GithubConfig.ClientID = githubClientID
+	cfg.GithubConfig.ClientSecret = githubClientSecret
+	return nil
 }

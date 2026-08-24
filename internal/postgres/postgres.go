@@ -2,7 +2,6 @@ package postgres
 
 import (
 	"database/sql"
-	"log"
 	"os"
 
 	"github.com/beldurad/obsidian-telegram-sync-go/internal/config"
@@ -10,7 +9,7 @@ import (
 	"github.com/lib/pq"
 )
 
-func New(dbCfg config.DatabaseConfig) *sql.DB {
+func New(dbCfg config.DatabaseConfig) (*sql.DB, error) {
 	cfg := pq.Config{
 		Host:     dbCfg.Host,
 		Port:     dbCfg.Port,
@@ -25,18 +24,18 @@ func New(dbCfg config.DatabaseConfig) *sql.DB {
 
 	err = db.Ping()
 	if err != nil {
-		log.Fatalf("Error while ping db: %v", err)
+		return nil, err
 	}
 
 	sqlBytes, err := os.ReadFile(dbCfg.InitSqlFilepath)
 	if err != nil {
-		log.Fatal(err)
+		return nil, err
 	}
 
 	_, err = db.Exec(string(sqlBytes))
 	if err != nil {
-		log.Fatal(err)
+		return nil, err
 	}
 
-	return db
+	return db, nil
 }

@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -329,8 +328,6 @@ func (c *GithubClient) RepoExists(owner, repo string) (bool, error) {
 func (c *GithubClient) Directory(owner, repo, path string, pageNum int, pageSize int) (domain.Page[domain.File], error) {
 	const op = "GithubClient.Directory"
 
-	log.Println("pageNum ", pageNum, "pageSize", pageSize)
-
 	if pageNum < 0 {
 		return domain.Page[domain.File]{}, fmt.Errorf(
 			"%v: invalid page number: %d", op, pageNum,
@@ -383,7 +380,6 @@ func (c *GithubClient) Directory(owner, repo, path string, pageNum int, pageSize
 	if length%pageSize != 0 {
 		totalPages++
 	}
-	log.Println("left:", leftBound, ",right:", rightBound, "dir:", dir[leftBound:rightBound])
 
 	return domain.Page[domain.File]{
 		TotalPages: totalPages,

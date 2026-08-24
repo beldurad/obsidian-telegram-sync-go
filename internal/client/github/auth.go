@@ -3,10 +3,13 @@ package github
 import (
 	"context"
 	"fmt"
+	"strings"
 
+	"github.com/beldurad/obsidian-telegram-sync-go/internal/config"
 	"github.com/beldurad/obsidian-telegram-sync-go/internal/domain"
 	"github.com/google/uuid"
 	"golang.org/x/oauth2"
+	"golang.org/x/oauth2/github"
 )
 
 type OAuthContext struct {
@@ -67,12 +70,19 @@ type OAuthService struct {
 }
 
 func NewOAuthService(
-	oauthConfig *oauth2.Config,
+	cfg config.GithubConfig,
 	contextStorage RemoteConnectCtxStorage,
 	tokenStorage RemoteTokenStorage,
 	remoteContentCache RemoteContentCache) *OAuthService {
+	oauthCfg := &oauth2.Config{
+		ClientID:     cfg.ClientID,
+		ClientSecret: cfg.ClientSecret,
+		RedirectURL:  cfg.RedirectURL,
+		Endpoint:     github.Endpoint,
+		Scopes:       strings.Split(cfg.Scopes, " "),
+	}
 	return &OAuthService{
-		conf:               oauthConfig,
+		conf:               oauthCfg,
 		contextStorage:     contextStorage,
 		tokenStorage:       tokenStorage,
 		remoteContentCache: remoteContentCache,

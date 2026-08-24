@@ -2,34 +2,44 @@ package main
 
 import (
 	"context"
-	"log"
 	"log/slog"
 	"os"
 	"os/signal"
-	"path/filepath"
-	"strings"
 	"syscall"
 	"time"
 
+	foundationbot "github.com/beldurad/obsidian-telegram-sync-go/foundation/bot"
+	"github.com/beldurad/obsidian-telegram-sync-go/foundation/telegram"
 	"github.com/beldurad/obsidian-telegram-sync-go/internal/bot"
 	"github.com/beldurad/obsidian-telegram-sync-go/internal/cache"
-	appgithub "github.com/beldurad/obsidian-telegram-sync-go/internal/client/github"
+	"github.com/beldurad/obsidian-telegram-sync-go/internal/client/github"
 	"github.com/beldurad/obsidian-telegram-sync-go/internal/config"
 	"github.com/beldurad/obsidian-telegram-sync-go/internal/http"
 	"github.com/beldurad/obsidian-telegram-sync-go/internal/postgres"
-	"golang.org/x/oauth2"
-	"golang.org/x/oauth2/github"
 )
 
 func main() {
-	cfg := config.MustLoad()
-	loadSecrets(&cfg)
 
-	db := postgres.New(cfg.DatabaseConfig)
+	log := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+		Level: slog.LevelDebug,
+	}))
+
+	cfg, err := config.Load()
+	if err != nil {
+		log.Error("error loading config", "error", err)
+		return
+	}
+
+	db, err := postgres.New(cfg.DatabaseConfig)
+	if err != nil {
+		log.Error("while postgres init", "error", err)
+		return
+	}
 
 	aliasPageCountCache := cache.NewPageCountCache()
 	templatePageCountCache := cache.NewPageCountCache()
 	remoteContentCache := cache.NewRemoteContentCache()
+	sessionService := cache.NewChatSessionService()
 
 	aliasStorage := postgres.NewAliasStorage(db, aliasPageCountCache)
 	templateStorage := postgres.NewTemplateStorage(db, templatePageCountCache)
@@ -38,15 +48,7 @@ func main() {
 	oauthTokenStorage := cache.NewRemoteTokenStorage()
 	oauthContextStorage := cache.NewRemoteConnectCtxStorage()
 
-	oauthCfg := oauth2.Config{
-		ClientID:     cfg.ClientID,
-		ClientSecret: cfg.ClientSecret,
-		Endpoint:     github.Endpoint,
-		RedirectURL:  cfg.RedirectURL,
-		Scopes:       strings.Split(cfg.Scopes, " "),
-	}
-
-	oauthService := appgithub.NewOAuthService(&oauthCfg, oauthContextStorage, oauthTokenStorage, remoteContentCache)
+	oauthService := github.NewOAuthService(cfg.GithubConfig, oauthContextStorage, oauthTokenStorage, remoteContentCache)
 
 	startHandler := bot.NewStartHandler()
 	aliasGetHandler := bot.NewGetAliasesHandler(aliasStorage)
@@ -57,13 +59,12 @@ func main() {
 	templateAddHandler := bot.NewTemplateAddHandler(templateStorage)
 	noteAddHandler := bot.NewAddNoteHandler(aliasStorage, templateStorage, oauthService, userVaultStorage)
 
-	sessionService := cache.NewChatSessionService()
+	tgClient, err := telegram.New(cfg.Token, cfg.WebhookURL, cfg.WebhookEndpoint)
+	if err != nil {
+		log.Error("error while initializing telegram client")
+	}
 
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.LevelDebug,
-	}))
-
-	b := bot.Init(cfg, sessionService, logger)
+	b := foundationbot.New(sessionService, tgClient, log)
 	b.AddHandler(startHandler)
 	b.AddHandler(aliasGetHandler)
 	b.AddHandler(aliasAddHandler)
@@ -76,53 +77,30 @@ func main() {
 	logMiddleware := bot.NewLogMiddleware(slog.Default())
 	b.Use(logMiddleware.Middleware())
 
-	server := http.StartServer(cfg, oauthService, logger)
+	server := http.StartServer(cfg, oauthService, log)
 
 	sigCtx, cancel := signal.NotifyContext(
 		context.Background(),
 		os.Interrupt,
 		syscall.SIGTERM,
 	)
-	b.StartListening(sigCtx)
-	go func() {
-		defer cancel()
-		<-sigCtx.Done()
-		shutdownCtx, cancel := context.WithTimeout(
-			context.Background(),
-			10*time.Second,
-		)
-		defer cancel()
-		if err := db.Close(); err != nil {
-			log.Printf("graceful shutdown failed: %v", err)
+	go b.StartListening(sigCtx)
+	defer cancel()
+	<-sigCtx.Done()
+	shutdownCtx, cancel := context.WithTimeout(
+		context.Background(),
+		10*time.Second,
+	)
+	defer cancel()
+	if err := db.Close(); err != nil {
+		log.Error("graceful shutdown failed: %v", "error", err)
+	}
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		log.Error("graceful shutdown failed: %v", "error", err)
+		if err := server.Close(); err != nil {
+			log.Error("server close failed: %v", "error", err)
 		}
-		if err := server.Shutdown(shutdownCtx); err != nil {
-			log.Printf("graceful shutdown failed: %v", err)
-			if err := server.Close(); err != nil {
-				log.Printf("server close failed: %v", err)
-			}
-		}
-		log.Println("server stopped")
-	}()
+	}
+	log.Info("server stopped")
 
-}
-
-func loadSecrets(cfg *config.Config) {
-	dir := os.Getenv("SECRETS_DIR")
-	if dir == "" {
-		dir = cfg.SecretsDir
-	}
-	if dir == "" {
-		log.Fatal("SECRETS_DIR is not set")
-	}
-	readSecret := func(name string) string {
-		content, err := os.ReadFile(filepath.Join(dir, name))
-		if err != nil {
-			log.Fatalf("cannot read secret %s: %v", name, err)
-		}
-		return strings.TrimSpace(string(content))
-	}
-	cfg.DatabaseConfig.Password = readSecret("db_pass")
-	cfg.TelegramConfig.Token = readSecret("tg_token")
-	cfg.GithubConfig.ClientID = readSecret("github_id")
-	cfg.GithubConfig.ClientSecret = readSecret("github_secret")
 }

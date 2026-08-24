@@ -12,8 +12,6 @@ import (
 
 const defaultWorkerPoolSize = 20
 
-const ChatSessionKey = "chat_session_key"
-
 var ErrInternalServer = fmt.Errorf("Internal Server Error")
 var ErrUnknown = fmt.Errorf("Unknown error while handling message")
 
@@ -280,7 +278,6 @@ func (b *Bot) handle(ctx context.Context, u tgbotapi.Update) {
 		return
 	}
 
-	ctx = context.WithValue(ctx, ChatSessionKey, session)
 	resp, err = handler.Handle(ctx, session, update)
 	if err != nil {
 		log.Debug("handler error", "error", err)

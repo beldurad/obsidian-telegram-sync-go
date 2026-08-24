@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"path"
 
 	"github.com/beldurad/obsidian-telegram-sync-go/foundation/bot"
@@ -76,7 +75,6 @@ func (h *GetAliasesHandler) Handle(ctx context.Context, s *bot.ChatSession, u bo
 			return bot.Response{}, fmt.Errorf("%v: payload unmarshaling: %w", op, err)
 		}
 		payload = payload.handlePageUpdate(u)
-		log.Println(payload)
 	}
 
 	aliasesPage, err := h.getter.AliasPage(
@@ -131,7 +129,6 @@ func (h *GetAliasesHandler) Handle(ctx context.Context, s *bot.ChatSession, u bo
 	}
 
 	payload = payloadFromPage(aliasesPage)
-	log.Println("after page", payload)
 	bytes, err := json.Marshal(payload)
 	if err != nil {
 		return bot.Response{}, fmt.Errorf("%v: marshaling response payload: %w", op, err)
