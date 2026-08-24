@@ -84,17 +84,20 @@ func main() {
 		os.Interrupt,
 		syscall.SIGTERM,
 	)
-	go b.StartListening(sigCtx)
 	defer cancel()
-	<-sigCtx.Done()
+
+	b.StartListening(sigCtx)
+
 	shutdownCtx, cancel := context.WithTimeout(
 		context.Background(),
 		10*time.Second,
 	)
 	defer cancel()
+
 	if err := db.Close(); err != nil {
 		log.Error("graceful shutdown failed: %v", "error", err)
 	}
+
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		log.Error("graceful shutdown failed: %v", "error", err)
 		if err := server.Close(); err != nil {
