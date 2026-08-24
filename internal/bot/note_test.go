@@ -42,6 +42,7 @@ func (m *noteAliasesMock) AliasPage(
 	m.chatID = chatID
 	m.pageNum = pageNum
 	m.pageSize = pageSize
+	m.page.CurPage = pageNum
 
 	return m.page, m.pageErr
 }
@@ -85,6 +86,7 @@ func (m *noteTemplatesMock) TemplatesPage(
 	m.chatID = chatID
 	m.pageNum = pageNum
 	m.pageSize = pageSize
+	m.page.CurPage = pageNum
 
 	return m.page, m.pageErr
 }
@@ -256,7 +258,8 @@ func TestNoteAddHandler_Handle_NextPage(t *testing.T) {
 	)
 
 	rawPayload, err := json.Marshal(pagePayload{
-		PageNum: 0,
+		PageNum:    0,
+		TotalPages: 2,
 	})
 	require.NoError(t, err)
 
@@ -715,10 +718,12 @@ func TestNoteAddHandler_Handle_SelectTemplate(t *testing.T) {
 }
 
 func TestNoteAddHandler_Handle_Template_NextPage(t *testing.T) {
+	totalPages := 3
+	curPage := 1
 	templates := &noteTemplatesMock{
 		page: domain.Page[domain.Template]{
-			TotalPages: 3,
-			CurPage:    1,
+			TotalPages: totalPages,
+			CurPage:    curPage,
 			Values: []domain.Template{{
 				ID:   uuid.New(),
 				Name: "daily",
@@ -736,7 +741,8 @@ func TestNoteAddHandler_Handle_Template_NextPage(t *testing.T) {
 	raw, err := json.Marshal(noteAddPayload{
 		Path: "/notes/inbox",
 		TemplatePage: pagePayload{
-			PageNum: 1,
+			PageNum:    curPage,
+			TotalPages: totalPages,
 		},
 	})
 	require.NoError(t, err)
@@ -749,7 +755,8 @@ func TestNoteAddHandler_Handle_Template_NextPage(t *testing.T) {
 		context.Background(),
 		session,
 		bot.Update{
-			ChatID: 123,
+			ChatID:       123,
+			CallbackData: NextPageCallback,
 			Raw: tgbotapi.Update{
 				CallbackQuery: &tgbotapi.CallbackQuery{
 					Data: NextPageCallback,

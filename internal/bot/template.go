@@ -74,12 +74,7 @@ func (h *GetTemplateHandler) Handle(ctx context.Context, s *bot.ChatSession, u b
 		if err != nil {
 			return bot.Response{}, fmt.Errorf("%v: unmarshaling payload: %w", op, err)
 		}
-		switch u.Raw.CallbackData() {
-		case NextPageCallback:
-			payload.PageNum++
-		case PrevPageCallback:
-			payload.PageNum--
-		}
+		payload = payload.handlePageUpdate(u)
 	}
 
 	templatesPage, err := h.getter.TemplatesPage(
@@ -114,19 +109,7 @@ func (h *GetTemplateHandler) Handle(ctx context.Context, s *bot.ChatSession, u b
 			)...)
 	}
 
-	buttons := tgbotapi.NewInlineKeyboardRow()
-	if templatesPage.HasPrev() {
-		buttons = append(
-			buttons,
-			tgbotapi.NewInlineKeyboardButtonData(PrevPageButtonText, PrevPageCallback),
-		)
-	}
-	if templatesPage.HasNext() {
-		buttons = append(
-			buttons,
-			tgbotapi.NewInlineKeyboardButtonData(NextPageButtonText, NextPageCallback),
-		)
-	}
+	buttons := pageButtons(templatesPage)
 
 	replyMarkup := tgbotapi.NewInlineKeyboardMarkup(
 		buttons,
@@ -144,6 +127,7 @@ func (h *GetTemplateHandler) Handle(ctx context.Context, s *bot.ChatSession, u b
 		c = msgCfg
 	}
 
+	payload = payloadFromPage(templatesPage)
 	bytes, err := json.Marshal(payload)
 	if err != nil {
 		resp, err = bot.Response{}, fmt.Errorf("%v: marshaling payload: %w", op, err)

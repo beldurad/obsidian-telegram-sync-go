@@ -187,7 +187,8 @@ func TestRepoSetHandler_Handle_NextPage(t *testing.T) {
 	)
 
 	raw, err := json.Marshal(pagePayload{
-		PageNum: 2,
+		PageNum:    2,
+		TotalPages: 5,
 	})
 	require.NoError(t, err)
 
@@ -199,6 +200,7 @@ func TestRepoSetHandler_Handle_NextPage(t *testing.T) {
 		context.Background(),
 		session,
 		bot.Update{
+			CallbackData: NextPageCallback,
 			Raw: tgbotapi.Update{
 				CallbackQuery: &tgbotapi.CallbackQuery{
 					Data: NextPageCallback,
@@ -250,6 +252,7 @@ func TestRepoSetHandler_Handle_PrevPage(t *testing.T) {
 		context.Background(),
 		session,
 		bot.Update{
+			CallbackData: PrevPageCallback,
 			Raw: tgbotapi.Update{
 				CallbackQuery: &tgbotapi.CallbackQuery{
 					Data: PrevPageCallback,

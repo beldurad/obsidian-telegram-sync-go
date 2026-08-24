@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"path"
 
 	"github.com/beldurad/obsidian-telegram-sync-go/foundation/bot"
@@ -32,8 +33,8 @@ const (
 	prevPathCallback   = ".."
 	prevPathButtonText = ".."
 
-	currentDirCallback   = "*"
-	currentDirButtonText = "Выбрать текущую директорию как путь"
+	curDirCallback   = "*"
+	curDirButtonText = "Выбрать текущую директорию как путь"
 )
 
 // ===== GET ALIASES =====
@@ -74,12 +75,8 @@ func (h *GetAliasesHandler) Handle(ctx context.Context, s *bot.ChatSession, u bo
 		if err != nil {
 			return bot.Response{}, fmt.Errorf("%v: payload unmarshaling: %w", op, err)
 		}
-		switch u.CallbackData {
-		case NextPageCallback:
-			payload.PageNum++
-		case PrevPageCallback:
-			payload.PageNum = max(0, payload.PageNum-1)
-		}
+		payload = payload.handlePageUpdate(u)
+		log.Println(payload)
 	}
 
 	aliasesPage, err := h.getter.AliasPage(
@@ -100,8 +97,8 @@ func (h *GetAliasesHandler) Handle(ctx context.Context, s *bot.ChatSession, u bo
 				fmt.Sprintf(`
 				%s -> %s
 				`,
-					alias.Path,
 					alias.Alias,
+					alias.Path,
 				),
 			)...)
 	}
@@ -115,13 +112,7 @@ func (h *GetAliasesHandler) Handle(ctx context.Context, s *bot.ChatSession, u bo
 				CommandAddAlias))...)
 	}
 
-	buttons := tgbotapi.NewInlineKeyboardRow()
-	if aliasesPage.HasPrev() {
-		buttons = append(buttons, tgbotapi.NewInlineKeyboardButtonData(PrevPageButtonText, PrevPageCallback))
-	}
-	if aliasesPage.HasNext() {
-		buttons = append(buttons, tgbotapi.NewInlineKeyboardButtonData(NextPageButtonText, NextPageCallback))
-	}
+	buttons := pageButtons(aliasesPage)
 
 	replyMarkup := tgbotapi.NewInlineKeyboardMarkup(
 		buttons,
@@ -139,6 +130,8 @@ func (h *GetAliasesHandler) Handle(ctx context.Context, s *bot.ChatSession, u bo
 		c = msgCfg
 	}
 
+	payload = payloadFromPage(aliasesPage)
+	log.Println("after page", payload)
 	bytes, err := json.Marshal(payload)
 	if err != nil {
 		return bot.Response{}, fmt.Errorf("%v: marshaling response payload: %w", op, err)
@@ -154,8 +147,8 @@ func (h *GetAliasesHandler) Handle(ctx context.Context, s *bot.ChatSession, u bo
 // ===== CREATE ALIAS =====
 
 type pathChoosingPayload struct {
-	CurPath string `json:"cur_path"`
-	PageNum int    `json:"page"`
+	CurPath     string `json:"cur_path"`
+	pagePayload `json:"page"`
 }
 
 func newPathChoosingPayload() pathChoosingPayload {
@@ -275,14 +268,9 @@ func (a *AddAliasHandler) handlePathSet(ctx context.Context, s *bot.ChatSession,
 			return bot.Response{}, fmt.Errorf("%v: unmarshaling payload: %w", op, err)
 		}
 	}
-	switch u.CallbackData {
-	case NextPageCallback:
-		payload.PageNum++
-	case PrevPageCallback:
-		payload.PageNum = max(0, payload.PageNum-1)
-	}
+	payload.pagePayload = payload.handlePageUpdate(u)
 
-	if u.CallbackData == currentDirCallback {
+	if u.CallbackData == curDirCallback {
 		msgCfg := tgbotapi.NewEditMessageText(u.ChatID, s.LastBotMessageID(), "Введите алиас для пути")
 		builder := newAliasBuilder(u.ChatID)
 		builder.Path = payload.CurPath
@@ -297,12 +285,9 @@ func (a *AddAliasHandler) handlePathSet(ctx context.Context, s *bot.ChatSession,
 		return bot.Response{
 			Message: msgCfg,
 		}, nil
-	} else if s.State() == StateWaitPath &&
-		u.CallbackData != NextPageCallback &&
-		u.CallbackData != PrevPageCallback {
-
+	} else if s.State() == StateWaitPath && !isPageUpdate(u) {
 		payload.CurPath = path.Join(payload.CurPath, u.CallbackData)
-		payload.PageNum = 0
+		payload.pagePayload = pagePayload{}
 	}
 
 	dir, err := client.Directory(
@@ -349,6 +334,7 @@ func (a *AddAliasHandler) handlePathSet(ctx context.Context, s *bot.ChatSession,
 		c = msgCfg
 	}
 
+	payload.pagePayload = payloadFromPage(dir)
 	bytes, err := json.Marshal(payload)
 	if err != nil {
 		return bot.Response{}, fmt.Errorf("%v: marshaling payload: %w", op, err)
@@ -386,30 +372,14 @@ func pathButtons(dirElems domain.Page[domain.File], payload pathChoosingPayload)
 	}
 	buttons = append(buttons, []tgbotapi.InlineKeyboardButton{
 		tgbotapi.NewInlineKeyboardButtonData(
-			currentDirButtonText,
-			currentDirCallback,
+			curDirButtonText,
+			curDirCallback,
 		),
 	})
 
-	paginationRow := tgbotapi.NewInlineKeyboardRow()
-	if dirElems.HasPrev() {
-		paginationRow = append(paginationRow,
-			tgbotapi.NewInlineKeyboardButtonData(
-				PrevPageButtonText,
-				PrevPageCallback,
-			),
-		)
-	}
-	if dirElems.HasNext() {
-		paginationRow = append(paginationRow,
-			tgbotapi.NewInlineKeyboardButtonData(
-				NextPageButtonText,
-				NextPageCallback,
-			),
-		)
-	}
-	if len(paginationRow) != 0 {
-		buttons = append(buttons, paginationRow)
+	pageRow := pageButtons(dirElems)
+	if len(pageRow) != 0 {
+		buttons = append(buttons, pageRow)
 	}
 
 	return tgbotapi.InlineKeyboardMarkup{

@@ -34,6 +34,7 @@ func (m *templateGetterMock) TemplatesPage(
 	m.chatID = chatID
 	m.pageNum = pageNum
 	m.pageSize = pageSize
+	m.templatesPage.CurPage = pageNum
 
 	return m.templatesPage, m.err
 }
@@ -100,7 +101,8 @@ func TestGetTemplateHandler_Handle_NextPage(t *testing.T) {
 	handler := NewGetTemplateHandler(getter)
 
 	raw, err := json.Marshal(pagePayload{
-		PageNum: 2,
+		PageNum:    2,
+		TotalPages: 4,
 	})
 	require.NoError(t, err)
 
@@ -112,7 +114,8 @@ func TestGetTemplateHandler_Handle_NextPage(t *testing.T) {
 		context.Background(),
 		session,
 		bot.Update{
-			ChatID: 123,
+			ChatID:       123,
+			CallbackData: NextPageCallback,
 			Raw: tgbotapi.Update{
 				CallbackQuery: &tgbotapi.CallbackQuery{
 					Data: NextPageCallback,
@@ -155,7 +158,8 @@ func TestGetTemplateHandler_Handle_PrevPage(t *testing.T) {
 		context.Background(),
 		session,
 		bot.Update{
-			ChatID: 123,
+			ChatID:       123,
+			CallbackData: PrevPageCallback,
 			Raw: tgbotapi.Update{
 				CallbackQuery: &tgbotapi.CallbackQuery{
 					Data: PrevPageCallback,

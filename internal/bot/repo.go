@@ -88,18 +88,13 @@ func (h *RepoSetHandler) Handle(ctx context.Context, s *bot.ChatSession, u bot.U
 	}
 
 	var payload pagePayload
-	if state != bot.DefaultChatState {
+	if state == RepoSetState {
 		raw := s.Payload()
 		err := json.Unmarshal(raw, &payload)
 		if err != nil {
 			return bot.Response{}, fmt.Errorf("%v: unmarshaling payload: %w", op, err)
 		}
-		switch u.Raw.CallbackData() {
-		case NextPageCallback:
-			payload.PageNum++
-		case PrevPageCallback:
-			payload.PageNum = max(0, payload.PageNum-1)
-		}
+		payload = payload.handlePageUpdate(u)
 	}
 
 	repoPage, err := client.UserRepos(user.Username, payload.PageNum, domain.DefaultPageSize)
@@ -107,35 +102,18 @@ func (h *RepoSetHandler) Handle(ctx context.Context, s *bot.ChatSession, u bot.U
 		return bot.Response{}, fmt.Errorf("%v: getting user repos: %w", op, err)
 	}
 
-	buttons := make([][]tgbotapi.InlineKeyboardButton, len(repoPage.Values))
-	for i, repo := range repoPage.Values {
-		buttons[i] = []tgbotapi.InlineKeyboardButton{
-			tgbotapi.NewInlineKeyboardButtonData(repo.Name, repo.Name),
-		}
-	}
-	paginationRow := make([]tgbotapi.InlineKeyboardButton, 0)
-	if repoPage.HasPrev() {
-		paginationRow = append(
-			paginationRow,
-			tgbotapi.NewInlineKeyboardButtonData(PrevPageButtonText, PrevPageCallback),
-		)
-	}
-	if repoPage.HasNext() {
-		paginationRow = append(
-			paginationRow,
-			tgbotapi.NewInlineKeyboardButtonData(NextPageButtonText, NextPageCallback),
-		)
-	}
-	if len(paginationRow) != 0 {
-		buttons = append(buttons, paginationRow)
-	}
-	markup := tgbotapi.InlineKeyboardMarkup{
-		InlineKeyboard: buttons,
-	}
+	markup := buttonsWithPagination(
+		repoPage,
+		func(r domain.RemoteRepo) tgbotapi.InlineKeyboardButton {
+			return tgbotapi.NewInlineKeyboardButtonData(
+				r.Name, r.Name,
+			)
+		},
+	)
 
 	var c tgbotapi.Chattable
 
-	if state == bot.DefaultChatState || s.LastBotMessageID() == 0 {
+	if state != RepoSetState || s.LastBotMessageID() == 0 {
 		msgCfg := tgbotapi.NewMessage(chatID, "Выберите репозиторий хранилища")
 		msgCfg.ReplyMarkup = markup
 		c = msgCfg
@@ -145,6 +123,7 @@ func (h *RepoSetHandler) Handle(ctx context.Context, s *bot.ChatSession, u bot.U
 		c = msgCfg
 	}
 
+	payload = payloadFromPage(repoPage)
 	bytes, err := json.Marshal(payload)
 	if err != nil {
 		return bot.Response{}, fmt.Errorf("%v: marshaling payload: %w", op, err)

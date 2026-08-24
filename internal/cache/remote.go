@@ -19,7 +19,12 @@ type RemoteContentCache struct {
 
 func NewRemoteContentCache() *RemoteContentCache {
 	return &RemoteContentCache{
-		lru: cache.NewLRU[remoteContentKey, []domain.File](cache.WithTTL[remoteContentKey, []domain.File](30 * time.Minute)),
+		lru: cache.NewLRU(
+			cache.
+				WithTTL[remoteContentKey, []domain.File](
+				30 * time.Minute,
+			),
+		),
 	}
 }
 

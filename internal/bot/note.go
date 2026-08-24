@@ -113,6 +113,13 @@ func (a *AddNoteHandler) Handle(ctx context.Context, s *bot.ChatSession, u bot.U
 	return
 }
 
+func aliasToButton(a domain.Alias) tgbotapi.InlineKeyboardButton {
+	return tgbotapi.NewInlineKeyboardButtonData(
+		a.Alias,
+		a.ID.String(),
+	)
+}
+
 func (a *AddNoteHandler) handleWaitAlias(ctx context.Context, s *bot.ChatSession, u bot.Update) (bot.Response, error) {
 	const op = "handleWaitAlias"
 
@@ -125,23 +132,11 @@ func (a *AddNoteHandler) handleWaitAlias(ctx context.Context, s *bot.ChatSession
 			return bot.Response{}, fmt.Errorf("%v: unmarshaling payload: %w", op, err)
 		}
 	}
-	if u.CallbackData == NextPageCallback {
-		payload.PageNum++
-	} else if u.CallbackData == PrevPageCallback {
-		payload.PageNum--
-	} else if state == StateNoteWaitAlias {
+	payload = payload.handlePageUpdate(u)
+	if state == StateNoteWaitAlias && !isPageUpdate(u) {
 		alias, err := a.aliasService.Alias(ctx, u.CallbackData, u.ChatID)
 		if err != nil {
 			return bot.Response{}, fmt.Errorf("%v: getting alias: %w", op, err)
-		}
-
-		notePayload := noteAddPayload{
-			Path:     alias.Path.Value,
-			PathType: alias.Path.Type,
-		}
-		bytes, err := json.Marshal(notePayload)
-		if err != nil {
-			return bot.Response{}, fmt.Errorf("%v: marshaling note payload: %w", op, err)
 		}
 
 		templates, err := a.templateService.TemplatesPage(ctx, u.ChatID, 0, domain.DefaultPageSize)
@@ -157,7 +152,17 @@ func (a *AddNoteHandler) handleWaitAlias(ctx context.Context, s *bot.ChatSession
 			}, nil
 		}
 
-		buttons := a.templateButtons(templates)
+		notePayload := noteAddPayload{
+			Path:     alias.Path.Value,
+			PathType: alias.Path.Type,
+		}
+		notePayload.TemplatePage = payloadFromPage(templates)
+		bytes, err := json.Marshal(notePayload)
+		if err != nil {
+			return bot.Response{}, fmt.Errorf("%v: marshaling note payload: %w", op, err)
+		}
+
+		buttons := buttonsWithPagination(templates, templateToButton)
 		msgCfg := tgbotapi.NewEditMessageText(u.ChatID, s.LastBotMessageID(), "Выберите шаблон")
 		msgCfg.ReplyMarkup = &buttons
 
@@ -180,7 +185,7 @@ func (a *AddNoteHandler) handleWaitAlias(ctx context.Context, s *bot.ChatSession
 			),
 		}, nil
 	}
-	buttons := a.aliasButtons(aliases)
+	buttons := buttonsWithPagination(aliases, aliasToButton)
 
 	var c tgbotapi.Chattable
 
@@ -192,6 +197,7 @@ func (a *AddNoteHandler) handleWaitAlias(ctx context.Context, s *bot.ChatSession
 		msgCfg := tgbotapi.NewEditMessageTextAndMarkup(u.ChatID, s.LastBotMessageID(), "Выберите путь", buttons)
 		c = msgCfg
 	}
+
 	bytes, err := json.Marshal(payload)
 	if err != nil {
 		return bot.Response{}, fmt.Errorf("%v: marshaling payload: %w", op, err)
@@ -205,36 +211,11 @@ func (a *AddNoteHandler) handleWaitAlias(ctx context.Context, s *bot.ChatSession
 
 }
 
-func (a *AddNoteHandler) aliasButtons(page domain.Page[domain.Alias]) tgbotapi.InlineKeyboardMarkup {
-	const op = "aliasButtons"
-	buttons := make([][]tgbotapi.InlineKeyboardButton, 0)
-	for _, alias := range page.Values {
-		buttons = append(buttons, []tgbotapi.InlineKeyboardButton{
-			tgbotapi.NewInlineKeyboardButtonData(
-				alias.Alias,
-				alias.ID.String(),
-			),
-		})
-	}
-	if page.HasNext() {
-		buttons = append(buttons, []tgbotapi.InlineKeyboardButton{
-			tgbotapi.NewInlineKeyboardButtonData(
-				"Next",
-				NextPageCallback,
-			),
-		})
-	}
-	if page.HasPrev() {
-		buttons = append(buttons, []tgbotapi.InlineKeyboardButton{
-			tgbotapi.NewInlineKeyboardButtonData(
-				"Prev",
-				PrevPageCallback,
-			),
-		})
-	}
-	return tgbotapi.InlineKeyboardMarkup{
-		InlineKeyboard: buttons,
-	}
+func templateToButton(template domain.Template) tgbotapi.InlineKeyboardButton {
+	return tgbotapi.NewInlineKeyboardButtonData(
+		template.Name,
+		template.ID.String(),
+	)
 }
 
 func (a *AddNoteHandler) handleWaitTemplate(ctx context.Context, s *bot.ChatSession, u bot.Update) (bot.Response, error) {
@@ -248,13 +229,9 @@ func (a *AddNoteHandler) handleWaitTemplate(ctx context.Context, s *bot.ChatSess
 		return bot.Response{}, fmt.Errorf("%v: unmarshaling payload: %w", op, err)
 	}
 
-	payload := &notePayload.TemplatePage
-
-	if u.Raw.CallbackData() == NextPageCallback {
-		payload.PageNum++
-	} else if u.Raw.CallbackData() == PrevPageCallback {
-		payload.PageNum--
-	} else if s.State() == StateNoteWaitTemplate {
+	payload := notePayload.TemplatePage
+	payload = payload.handlePageUpdate(u)
+	if s.State() == StateNoteWaitTemplate && !isPageUpdate(u) {
 		template, err := a.templateService.Template(ctx, u.Raw.CallbackData(), u.ChatID)
 		if err != nil {
 			return bot.Response{}, fmt.Errorf("%v: getting template: %w", op, err)
@@ -289,59 +266,25 @@ func (a *AddNoteHandler) handleWaitTemplate(ctx context.Context, s *bot.ChatSess
 		}, nil
 	}
 
-	buttons := a.templateButtons(templates)
+	buttons := buttonsWithPagination(templates, templateToButton)
 
 	msgCfg := tgbotapi.NewEditMessageTextAndMarkup(u.ChatID, s.LastBotMessageID(), "Выберите путь", buttons)
+
+	notePayload.TemplatePage = payloadFromPage(templates)
 	bytes, err := json.Marshal(notePayload)
 	if err != nil {
 		return bot.Response{}, fmt.Errorf("%v: marshaling payload: %w", op, err)
 	}
-
 	s.SetPayload(bytes)
+
 	return bot.Response{
 		Message: msgCfg,
 	}, nil
 }
 
-func (a *AddNoteHandler) templateButtons(page domain.Page[domain.Template]) tgbotapi.InlineKeyboardMarkup {
-	const op = "templateButtons"
-	buttons := make([][]tgbotapi.InlineKeyboardButton, 0)
-	for _, template := range page.Values {
-		buttons = append(buttons, []tgbotapi.InlineKeyboardButton{
-			tgbotapi.NewInlineKeyboardButtonData(
-				template.Name,
-				template.ID.String(),
-			),
-		})
-	}
-	paginationRow := tgbotapi.NewInlineKeyboardRow()
-	if page.HasPrev() {
-		paginationRow = append(paginationRow,
-			tgbotapi.NewInlineKeyboardButtonData(
-				PrevPageButtonText,
-				PrevPageCallback,
-			),
-		)
-	}
-	if page.HasNext() {
-		paginationRow = append(paginationRow,
-			tgbotapi.NewInlineKeyboardButtonData(
-				NextPageButtonText,
-				NextPageCallback,
-			),
-		)
-	}
-	if len(paginationRow) != 0 {
-		buttons = append(buttons, paginationRow)
-	}
-
-	return tgbotapi.InlineKeyboardMarkup{
-		InlineKeyboard: buttons,
-	}
-}
-
 func (a *AddNoteHandler) handleWaitText(ctx context.Context, s *bot.ChatSession, u bot.Update) (bot.Response, error) {
 	const op = "handleWaitText"
+
 	notePayload := noteAddPayload{}
 	raw := s.Payload()
 	err := json.Unmarshal(raw, &notePayload)

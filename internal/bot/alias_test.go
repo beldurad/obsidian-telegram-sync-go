@@ -35,7 +35,7 @@ func (m *aliasesGetterMock) AliasPage(
 	m.chatID = chatID
 	m.pageNum = pageNum
 	m.pageSize = pageSize
-
+	m.page.CurPage = pageNum
 	return m.page, m.err
 }
 
@@ -139,7 +139,8 @@ func TestGetAliasesHandler_Handle_NextPage(t *testing.T) {
 	h := NewGetAliasesHandler(getter)
 
 	rawPayload, err := json.Marshal(pagePayload{
-		PageNum: 0,
+		PageNum:    0,
+		TotalPages: 3,
 	})
 	require.NoError(t, err)
 
@@ -176,7 +177,8 @@ func TestGetAliasesHandler_Handle_PrevPage(t *testing.T) {
 	h := NewGetAliasesHandler(getter)
 
 	rawPayload, err := json.Marshal(pagePayload{
-		PageNum: 1,
+		PageNum:    1,
+		TotalPages: 2,
 	})
 	require.NoError(t, err)
 
@@ -203,7 +205,8 @@ func TestGetAliasesHandler_Handle_PrevPage_DoesNotGoBelowZero(t *testing.T) {
 	h := NewGetAliasesHandler(getter)
 
 	rawPayload, err := json.Marshal(pagePayload{
-		PageNum: 0,
+		PageNum:    0,
+		TotalPages: 1,
 	})
 	require.NoError(t, err)
 
@@ -327,7 +330,8 @@ func TestGetAliasesHandler_Handle_PaginationButtons(t *testing.T) {
 			}
 			getter.page.Values = values
 			rawPayload, err := json.Marshal(pagePayload{
-				PageNum: tt.beforePageNum,
+				PageNum:    tt.beforePageNum,
+				TotalPages: tt.totalPages,
 			})
 			require.NoError(t, err)
 
@@ -456,8 +460,8 @@ func TestPathButtons(t *testing.T) {
 					},
 					{
 						tgbotapi.NewInlineKeyboardButtonData(
-							currentDirButtonText,
-							currentDirCallback,
+							curDirButtonText,
+							curDirCallback,
 						),
 					},
 				},
@@ -495,8 +499,8 @@ func TestPathButtons(t *testing.T) {
 					},
 					{
 						tgbotapi.NewInlineKeyboardButtonData(
-							currentDirButtonText,
-							currentDirCallback,
+							curDirButtonText,
+							curDirCallback,
 						),
 					},
 				},
@@ -534,8 +538,8 @@ func TestPathButtons(t *testing.T) {
 					},
 					{
 						tgbotapi.NewInlineKeyboardButtonData(
-							currentDirButtonText,
-							currentDirCallback,
+							curDirButtonText,
+							curDirCallback,
 						),
 					},
 				},
@@ -666,8 +670,8 @@ func TestAddAliasHandler_Handle_WaitPath_UsesPayload(t *testing.T) {
 	)
 
 	payload := pathChoosingPayload{
-		CurPath: "/foo",
-		PageNum: 2,
+		CurPath:     "/foo",
+		pagePayload: pagePayload{2, 2},
 	}
 
 	raw, err := json.Marshal(payload)
@@ -719,8 +723,8 @@ func TestAddAliasHandler_Handle_SelectCurrentDirectory(t *testing.T) {
 	)
 
 	raw, err := json.Marshal(pathChoosingPayload{
-		CurPath: "/foo/bar",
-		PageNum: 3,
+		CurPath:     "/foo/bar",
+		pagePayload: pagePayload{3, 3},
 	})
 	require.NoError(t, err)
 
@@ -733,7 +737,7 @@ func TestAddAliasHandler_Handle_SelectCurrentDirectory(t *testing.T) {
 		session,
 		bot.Update{
 			ChatID:       123,
-			CallbackData: currentDirCallback,
+			CallbackData: curDirCallback,
 		},
 	)
 
@@ -784,8 +788,8 @@ func TestAddAliasHandler_HandlePathSet_FileSelected(t *testing.T) {
 	)
 
 	raw, err := json.Marshal(pathChoosingPayload{
-		CurPath: "/foo",
-		PageNum: 1,
+		CurPath:     "/foo",
+		pagePayload: pagePayload{1, 1},
 	})
 	require.NoError(t, err)
 

@@ -183,7 +183,9 @@ func (m *RemoteStorage) UserRepos(
 		return m.UserReposFn(username, pageNum, pageSize)
 	}
 
-	return domain.Page[domain.RemoteRepo]{}, nil
+	return domain.Page[domain.RemoteRepo]{
+		CurPage: pageNum,
+	}, nil
 }
 
 func (m *RemoteStorage) RepoExists(
