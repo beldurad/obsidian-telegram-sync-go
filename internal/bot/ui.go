@@ -14,9 +14,9 @@ func buttonsWithPagination[T any](page domain.Page[T], toButton func(obj T) tgbo
 func buttons[T any](objects []T, toButton func(obj T) tgbotapi.InlineKeyboardButton) tgbotapi.InlineKeyboardMarkup {
 	keyboard := make([][]tgbotapi.InlineKeyboardButton, len(objects))
 	for i := range objects {
-		keyboard = append(keyboard, []tgbotapi.InlineKeyboardButton{
+		keyboard[i] = []tgbotapi.InlineKeyboardButton{
 			toButton(objects[i]),
-		})
+		}
 	}
 	return tgbotapi.NewInlineKeyboardMarkup(keyboard...)
 }
