@@ -20,6 +20,9 @@ func New(dbCfg config.DatabaseConfig) (*sql.DB, error) {
 	}
 
 	c, err := pq.NewConnectorConfig(cfg)
+	if err != nil {
+		return nil, err
+	}
 	db := sql.OpenDB(c)
 
 	err = db.Ping()

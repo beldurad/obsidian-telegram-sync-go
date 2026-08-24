@@ -33,6 +33,7 @@ func (a *AuthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if code == "" || state == "" {
 		w.WriteHeader(http.StatusBadRequest)
 		w.Write([]byte("Bad Request"))
+		return
 	}
 
 	err := a.service.CompleteAuth(ctx, code, state)

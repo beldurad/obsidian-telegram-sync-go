@@ -143,6 +143,9 @@ func (s *AliasStorage) AliasPage(ctx context.Context, chatID int64, pageNum, pag
 		}
 		cur++
 	}
+	if err := rows.Err(); err != nil {
+		return zero, fmt.Errorf("%v: rows error: %w", op, err)
+	}
 	page.Values = templates[:cur]
 	return page, nil
 }
