@@ -9,10 +9,10 @@ import (
 	"time"
 
 	foundationbot "github.com/beldurad/obsidian-telegram-sync-go/foundation/bot"
-	"github.com/beldurad/obsidian-telegram-sync-go/foundation/telegram"
 	"github.com/beldurad/obsidian-telegram-sync-go/internal/bot"
 	"github.com/beldurad/obsidian-telegram-sync-go/internal/cache"
 	"github.com/beldurad/obsidian-telegram-sync-go/internal/client/github"
+	"github.com/beldurad/obsidian-telegram-sync-go/internal/client/telegram"
 	"github.com/beldurad/obsidian-telegram-sync-go/internal/config"
 	"github.com/beldurad/obsidian-telegram-sync-go/internal/http"
 	"github.com/beldurad/obsidian-telegram-sync-go/internal/postgres"
