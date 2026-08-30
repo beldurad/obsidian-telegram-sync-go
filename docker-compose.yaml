@@ -1,10 +1,8 @@
 services:
   postgres:
     image: postgres:16-alpine
-    environment:
-      POSTGRES_USER: user
-      POSTGRES_DB: postgres
-      POSTGRES_PASSWORD_FILE: /run/secrets/db_pass
+    env_file:
+      - .env
     ports:
       - "5432:5432"
     volumes:
@@ -19,17 +17,35 @@ services:
     secrets:
       - db_pass
 
-  app:
-    build: .
-    environment:
-      CONFIG_PATH: /app/config/local.yaml
-      SECRETS_DIR: /run/secrets
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile.migrate
+    env_file:
+      - .env
     depends_on:
       postgres:
         condition: service_healthy
     volumes:
       - ./config:/app/config
-      - ./sql:/app/sql
+    networks:
+      - backend
+    secrets:
+      - db_pass
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    volumes:
+      - ./config:/app/config
       - ./tls:/app/tls
     ports:
       - "443:443"

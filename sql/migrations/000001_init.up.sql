@@ -1,10 +1,10 @@
-CREATE TABLE IF NOT EXISTS vault (
+CREATE TABLE vault (
 	chat_id BIGINT PRIMARY KEY,
 	owner   TEXT NOT NULL,
 	repo    TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS alias (
+CREATE TABLE alias (
 	id     UUID PRIMARY KEY,
 	chat_id BIGINT NOT NULL,
 	path   TEXT NOT NULL,
@@ -12,9 +12,9 @@ CREATE TABLE IF NOT EXISTS alias (
 	alias  TEXT NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_alias_chat_id ON alias (chat_id);
+CREATE INDEX idx_alias_chat_id ON alias (chat_id);
 
-CREATE TABLE IF NOT EXISTS template (
+CREATE TABLE template (
 	id         UUID PRIMARY KEY,
 	chat_id    BIGINT NOT NULL,
 	name       TEXT NOT NULL,
@@ -22,4 +22,4 @@ CREATE TABLE IF NOT EXISTS template (
 	created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_template_chat_id ON template (chat_id);
+CREATE INDEX dx_template_chat_id ON template (chat_id);

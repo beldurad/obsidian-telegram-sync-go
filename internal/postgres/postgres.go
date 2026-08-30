@@ -2,14 +2,13 @@ package postgres
 
 import (
 	"database/sql"
-	"os"
 
 	"github.com/beldurad/obsidian-telegram-sync-go/internal/config"
 
 	"github.com/lib/pq"
 )
 
-func New(dbCfg config.DatabaseConfig) (*sql.DB, error) {
+func New(dbCfg config.DBConfig) (*sql.DB, error) {
 	cfg := pq.Config{
 		Host:     dbCfg.Host,
 		Port:     dbCfg.Port,
@@ -26,16 +25,6 @@ func New(dbCfg config.DatabaseConfig) (*sql.DB, error) {
 	db := sql.OpenDB(c)
 
 	err = db.Ping()
-	if err != nil {
-		return nil, err
-	}
-
-	sqlBytes, err := os.ReadFile(dbCfg.InitSqlFilepath)
-	if err != nil {
-		return nil, err
-	}
-
-	_, err = db.Exec(string(sqlBytes))
 	if err != nil {
 		return nil, err
 	}

@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
@@ -15,22 +14,21 @@ import (
 	"github.com/beldurad/obsidian-telegram-sync-go/internal/client/telegram"
 	"github.com/beldurad/obsidian-telegram-sync-go/internal/config"
 	"github.com/beldurad/obsidian-telegram-sync-go/internal/http"
+	"github.com/beldurad/obsidian-telegram-sync-go/internal/logger"
 	"github.com/beldurad/obsidian-telegram-sync-go/internal/postgres"
 )
 
 func main() {
 
-	log := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.LevelDebug,
-	}))
+	log := logger.Logger()
 
-	cfg, err := config.Load()
+	cfg, err := config.LoadEnv()
 	if err != nil {
 		log.Error("error loading config", "error", err)
 		return
 	}
 
-	db, err := postgres.New(cfg.DatabaseConfig)
+	db, err := postgres.New(cfg.DBConfig)
 	if err != nil {
 		log.Error("while postgres init", "error", err)
 		return
@@ -74,7 +72,7 @@ func main() {
 	b.AddHandler(templateAddHandler)
 	b.AddHandler(noteAddHandler)
 
-	logMiddleware := bot.NewLogMiddleware(slog.Default())
+	logMiddleware := bot.NewLogMiddleware(log)
 	b.Use(logMiddleware.Middleware())
 
 	server := http.StartServer(cfg, oauthService, log)
