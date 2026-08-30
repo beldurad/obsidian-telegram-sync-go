@@ -48,7 +48,7 @@ jobs:
         run: |
           docker build \
             -f Dockerfile \
-            -t "$APP_NAME:$SHA" \
+            -t "${{ env.APP_NAME }}:${{ github.sha }}" \
             .
 
       - name: Build migration image
@@ -57,23 +57,21 @@ jobs:
         run: |
           docker build \
             -f Dockerfile.migrate \
-            -t "$APP_NAME-migrate:$SHA" \
+            -t "${{ env.APP_NAME }}-migrate:${{ github.sha }}" \
             .
 
       - name: Export images
-        env:
-          SHA: ${{ github.sha }}
         run: |
           docker save \
-            "$APP_NAME:$SHA" \
-            "$APP_NAME-migrate:$SHA" \
-            | gzip > "$APP_NAME-$SHA.tar.gz"
+            "${{ env.APP_NAME }}:${{ github.sha }}" \
+            "${{ env.APP_NAME }}-migrate:${{ github.sha }}" \
+            | gzip > "${{ env.APP_NAME }}-${{ github.sha }}.tar.gz"
 
       - name: Upload images artifact
         uses: actions/upload-artifact@v4
         with:
-          name: $APP_NAME-images
-          path: $APP_NAME-$SHA.tar.gz
+          name: ${{ env.APP_NAME }}-images
+          path: ${{ env.APP_NAME }}-${{ github.sha }}.tar.gz
 
   deploy:
     needs: build
@@ -83,7 +81,7 @@ jobs:
       - name: Download images artifact
         uses: actions/download-artifact@v4
         with:
-          name: $APP_NAME-images
+          name: ${{ env.APP_NAME }}-images
 
       - name: Configure SSH
         run: |
@@ -105,8 +103,8 @@ jobs:
           SHA: ${{ github.sha }}
         run: |
           scp -i ~/.ssh/deploy_key \
-            "$APP_NAME-$SHA.tar.gz" \
-            "$USER@$HOST:/tmp/$APP_NAME-$SHA.tar.gz"
+            "${{ env.APP_NAME }}-${{ github.sha }}.tar.gz" \
+            "$USER@$HOST:/tmp/${{ env.APP_NAME }}-${{ github.sha }}.tar.gz"
 
       - name: Deploy
         env:
@@ -118,17 +116,17 @@ jobs:
             set -e
 
             echo 'Loading Docker images...'
-            gunzip -c /tmp/$APP_NAME-$SHA.tar.gz | docker load
+            gunzip -c /tmp/${{ env.APP_NAME }}-${{ github.sha }}.tar.gz | docker load
 
             echo 'Updating application version...'
-            sed -i 's/^APP_VERSION=.*/APP_VERSION=$SHA/' /opt/$APP_NAME/.env
+            sed -i 's/^APP_VERSION=.*/APP_VERSION=${{ github.sha }}/' /opt/${{ env.APP_NAME }}/.env
 
             echo 'Starting application...'
-            cd /opt/$APP_NAME
+            cd /opt/${{ env.APP_NAME }}
             docker compose up -d
 
             echo 'Cleaning up...'
-            rm -f /tmp/$APP_NAME-$SHA.tar.gz
+            rm -f /tmp/${{ env.APP_NAME }}-${{ github.sha }}.tar.gz
 
             echo 'Deployment complete'
             docker compose ps
