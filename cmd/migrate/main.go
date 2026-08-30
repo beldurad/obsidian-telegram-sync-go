@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 
 	"github.com/beldurad/obsidian-telegram-sync-go/internal/config"
 	"github.com/golang-migrate/migrate/v4"
@@ -17,7 +18,7 @@ func main() {
 	cfg, err := config.LoadMigrate()
 	if err != nil {
 		log.Error("loading config", "error", err)
-		return
+		os.Exit(1)
 	}
 	m, err := migrate.New(
 		fmt.Sprintf("file://%s", cfg.MigrationsDir),
@@ -25,13 +26,13 @@ func main() {
 	)
 	if err != nil {
 		log.Error("create migrate", "error", err)
-		return
+		os.Exit(1)
 	}
 	defer m.Close()
 
 	if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
 		log.Error("run migrations", "error", err)
-		return
+		os.Exit(1)
 	}
 
 	log.Info("migrations completed successfully")

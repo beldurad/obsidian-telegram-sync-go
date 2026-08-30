@@ -25,13 +25,13 @@ func main() {
 	cfg, err := config.LoadEnv()
 	if err != nil {
 		log.Error("error loading config", "error", err)
-		return
+		os.Exit(1)
 	}
 
 	db, err := postgres.New(cfg.DBConfig)
 	if err != nil {
 		log.Error("while postgres init", "error", err)
-		return
+		os.Exit(1)
 	}
 
 	aliasPageCountCache := cache.NewPageCountCache()
@@ -60,6 +60,7 @@ func main() {
 	tgClient, err := telegram.New(cfg.Token, cfg.WebhookURL, cfg.WebhookEndpoint)
 	if err != nil {
 		log.Error("error while initializing telegram client")
+		os.Exit(1)
 	}
 
 	b := foundationbot.New(sessionService, tgClient, log)
@@ -94,6 +95,7 @@ func main() {
 
 	if err := db.Close(); err != nil {
 		log.Error("graceful shutdown failed: %v", "error", err)
+		os.Exit(1)
 	}
 
 	if err := server.Shutdown(shutdownCtx); err != nil {
@@ -101,6 +103,7 @@ func main() {
 		if err := server.Close(); err != nil {
 			log.Error("server close failed: %v", "error", err)
 		}
+		os.Exit(1)
 	}
 	log.Info("server stopped")
 
