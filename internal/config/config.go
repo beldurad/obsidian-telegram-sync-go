@@ -56,7 +56,7 @@ func LoadDB() (DBConfig, error) {
 	if err := validateDBConfig(cfg); err != nil {
 		return DBConfig{}, err
 	}
-	return DBConfig{}, nil
+	return cfg, nil
 }
 func validateDBConfig(cfg DBConfig) error {
 	if cfg.Host == "" {
