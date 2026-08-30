@@ -48,7 +48,7 @@ func LoadDB() (DBConfig, error) {
 	if !ok || passFile == "" {
 		return DBConfig{}, fmt.Errorf("%s not set", DB_PASS_FILE)
 	}
-	pass, err := readSecret(DB_PASS_FILE)
+	pass, err := readSecret(passFile)
 	if err != nil {
 		return DBConfig{}, err
 	}
@@ -83,7 +83,11 @@ func LoadTG() (TGConfig, error) {
 	if err := cleanenv.ReadEnv(&cfg); err != nil {
 		return TGConfig{}, err
 	}
-	token, err := readSecret(TG_TOKEN_FILE)
+	tokenFile, ok := os.LookupEnv(TG_TOKEN_FILE)
+	if !ok || tokenFile == "" {
+		return TGConfig{}, fmt.Errorf("no %s env or empty", TG_TOKEN_FILE)
+	}
+	token, err := readSecret(tokenFile)
 	if err != nil {
 		return TGConfig{}, err
 	}
@@ -119,11 +123,19 @@ func LoadGithub() (GithubConfig, error) {
 	if err := cleanenv.ReadEnv(&cfg); err != nil {
 		return GithubConfig{}, err
 	}
-	id, err := readSecret(GITHUB_ID_FILE)
+	idFile, ok := os.LookupEnv(GITHUB_ID_FILE)
+	if !ok || idFile == "" {
+		return GithubConfig{}, fmt.Errorf("no %s env or empty", GITHUB_ID_FILE)
+	}
+	id, err := readSecret(idFile)
 	if err != nil {
 		return GithubConfig{}, err
 	}
-	secret, err := readSecret(GITHUB_SECRET_FILE)
+	secretFile, ok := os.LookupEnv(GITHUB_SECRET_FILE)
+	if !ok || secretFile == "" {
+		return GithubConfig{}, fmt.Errorf("no %s env or empty", GITHUB_SECRET_FILE)
+	}
+	secret, err := readSecret(secretFile)
 	if err != nil {
 		return GithubConfig{}, err
 	}
