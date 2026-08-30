@@ -10,7 +10,7 @@ permissions:
 
 env:
   APP_IMAGE: obstg
-  MIGRATE_IMAGE: obstg-image
+  MIGRATE_IMAGE: obstg-migrate
 
 jobs:
   test:
