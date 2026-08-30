@@ -9,7 +9,8 @@ permissions:
   contents: read
 
 env:
-  APP_NAME: obstg
+  APP_IMAGE: obstg
+  MIGRATE_IMAGE: obstg-image
 
 jobs:
   test:
@@ -48,7 +49,7 @@ jobs:
         run: |
           docker build \
             -f Dockerfile \
-            -t "${{ env.APP_NAME }}:${{ github.sha }}" \
+            -t "${{ env.APP_IMAGE }}:${{ github.sha }}" \
             .
 
       - name: Build migration image
@@ -57,21 +58,21 @@ jobs:
         run: |
           docker build \
             -f Dockerfile.migrate \
-            -t "${{ env.APP_NAME }}-migrate:${{ github.sha }}" \
+            -t "${{ env.MIGRATE_IMAGE }}:${{ github.sha }}" \
             .
 
       - name: Export images
         run: |
           docker save \
-            "${{ env.APP_NAME }}:${{ github.sha }}" \
-            "${{ env.APP_NAME }}-migrate:${{ github.sha }}" \
-            | gzip > "${{ env.APP_NAME }}-${{ github.sha }}.tar.gz"
+            "${{ env.APP_IMAGE }}:${{ github.sha }}" \
+            "${{ env.MIGRATE_IMAGE }}:${{ github.sha }}" \
+            | gzip > "${{ env.APP_IMAGE }}-${{ github.sha }}.tar.gz"
 
       - name: Upload images artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.APP_NAME }}-images
-          path: ${{ env.APP_NAME }}-${{ github.sha }}.tar.gz
+          name: ${{ env.APP_IMAGE }}-images
+          path: ${{ env.APP_IMAGE }}-${{ github.sha }}.tar.gz
 
   deploy:
     needs: build
@@ -81,7 +82,7 @@ jobs:
       - name: Download images artifact
         uses: actions/download-artifact@v4
         with:
-          name: ${{ env.APP_NAME }}-images
+          name: ${{ env.APP_IMAGE }}-images
 
       - name: Configure SSH
         run: |
@@ -103,8 +104,8 @@ jobs:
           SHA: ${{ github.sha }}
         run: |
           scp -i ~/.ssh/deploy_key \
-            "${{ env.APP_NAME }}-${{ github.sha }}.tar.gz" \
-            "$USER@$HOST:/tmp/${{ env.APP_NAME }}-${{ github.sha }}.tar.gz"
+            "${{ env.APP_IMAGE }}-${{ github.sha }}.tar.gz" \
+            "$USER@$HOST:/tmp/${{ env.APP_IMAGE }}-${{ github.sha }}.tar.gz"
 
       - name: Deploy
         env:
@@ -116,17 +117,17 @@ jobs:
             set -e
 
             echo 'Loading Docker images...'
-            gunzip -c /tmp/${{ env.APP_NAME }}-${{ github.sha }}.tar.gz | docker load
+            gunzip -c /tmp/${{ env.APP_IMAGE }}-${{ github.sha }}.tar.gz | docker load
 
             echo 'Updating application version...'
-            sed -i 's/^APP_VERSION=.*/APP_VERSION=${{ github.sha }}/' /opt/${{ env.APP_NAME }}/.env
+            sed -i 's/^APP_VERSION=.*/APP_VERSION=${{ github.sha }}/' /opt/${{ env.APP_IMAGE }}/.env
 
             echo 'Starting application...'
-            cd /opt/${{ env.APP_NAME }}
+            cd /opt/${{ env.APP_IMAGE }}
             docker compose up -d
 
             echo 'Cleaning up...'
-            rm -f /tmp/${{ env.APP_NAME }}-${{ github.sha }}.tar.gz
+            rm -f /tmp/${{ env.APP_IMAGE }}-${{ github.sha }}.tar.gz
 
             echo 'Deployment complete'
             docker compose ps
